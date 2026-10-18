@@ -135,6 +135,29 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** 想法气泡的“露一句”：执行型露核心，诗/梦境只露标题，点开才展开全文。 */
+    function ideaPeekText(idea) {
+      if (!idea) return ''
+      const a = idea.artifact || {}
+      switch (idea.skill) {
+        case 'poetic-essence':
+        case 'deep-dream':
+          return idea.ideaTitle || a.poem || a.dream || idea.suggestion || idea.title || ''
+        case 'constraint-flip':
+          return a.flipped || a.constraint || idea.suggestion || idea.ideaTitle || idea.title || ''
+        case 'cross-domain':
+          return a.insight || a.analogy || idea.suggestion || idea.ideaTitle || idea.title || ''
+        case 'clarify-intent':
+          return a.question || a.intent || idea.suggestion || idea.ideaTitle || idea.title || ''
+        case 'act-on-ground':
+          return a.step || idea.suggestion || idea.ideaTitle || idea.title || ''
+        case 'reflect-anchor':
+          return a.anchor || a.lesson || idea.suggestion || idea.ideaTitle || idea.title || ''
+        default:
+          return idea.suggestion || idea.ideaTitle || idea.title || ''
+      }
+    }
+
     function ideaCopyText(idea) {
       if (!idea) return ''
       if (Number(idea.format) >= 3 && typeof idea.text === 'string' && idea.text) return idea.text
@@ -4084,14 +4107,14 @@ window.__ModuleLoader__.load({
                       onMouseLeave: releaseBubble,
                       onFocus: holdBubble,
                       onBlur: releaseBubble,
-                      'aria-label': `${bubble.ideaTitle || bubble.suggestion || bubble.title} · ${translate('ideaPeek')}`,
+                      'aria-label': `${ideaPeekText(bubble)} · ${translate('ideaPeek')}`,
                       title: translate('ideaPeek'),
                     },
                     h('span', { className: 'ds-thought__glow', 'aria-hidden': 'true' }),
                     h(
                       'span',
                       { className: 'ds-thought__text' },
-                      bubble.ideaTitle || bubble.suggestion || bubble.title,
+                      ideaPeekText(bubble),
                     ),
                   ),
                 ),
