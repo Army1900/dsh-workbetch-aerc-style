@@ -1339,6 +1339,8 @@ window.__ModuleLoader__.load({
         cyber: {
           limit: 78 + Math.random() * 50,
           nextStepAt: now + 300 + Math.random() * 1000,
+          probeAt: now + 2200 + Math.random() * 4200,
+          probe: false,
           phase: Math.random() * Math.PI * 2,
         },
       }
@@ -1368,6 +1370,10 @@ window.__ModuleLoader__.load({
         pauseUntil: 0,
         nextBurstAt: now + 2000,
         startle: 0,
+        plantPulse: 0,
+        plantSide: 1,
+        nextCyberPauseAt: now + 2600 + Math.random() * 3000,
+        cyberPauseUntil: 0,
         omega: 0,
         abdomenLag: 0,
         warp: null,
@@ -1394,6 +1400,8 @@ window.__ModuleLoader__.load({
           leg.nextAt = 0
           leg.cyber.limit = 78 + Math.random() * 50
           leg.cyber.nextStepAt = now + 300 + Math.random() * 1000
+          leg.cyber.probe = false
+          leg.cyber.probeAt = now + 2200 + Math.random() * 4200
           leg.cyber.phase = Math.random() * Math.PI * 2
           continue
         }
@@ -1977,7 +1985,10 @@ window.__ModuleLoader__.load({
                 leg.cyber.limit = 78 + Math.random() * 50
                 leg.cyber.nextStepAt =
                   now + (speed > 160 ? 260 + Math.random() * 500 : 450 + Math.random() * 900)
-                sim.startle = Math.max(sim.startle, 0.16)
+                leg.cyber.probe = false
+                sim.plantPulse = Math.min(1.2, sim.plantPulse + 0.9)
+                sim.plantSide = leg.def.side
+                sim.startle = Math.max(sim.startle, 0.22)
                 swinging = Math.max(0, swinging - 1)
               } else {
                 leg.lift = Math.sin(Math.PI * p)
@@ -1996,9 +2007,15 @@ window.__ModuleLoader__.load({
 
             const homeAngle = sim.angle + Math.atan2(leg.def.home[1], leg.def.home[0])
             const motionAngle = speed > 8 ? Math.atan2(sim.vy, sim.vx) : sim.angle
+            const probeBusy = sim.legs.some((other) => other.cyber.probe)
+            const probing =
+              !probeBusy && !leg.cyber.probe && now >= leg.cyber.probeAt && Math.random() < 0.55
             let angle
             let radius
-            if (moving) {
+            if (probing) {
+              angle = homeAngle + (Math.random() - 0.5) * 0.18
+              radius = 128 + Math.random() * 62
+            } else if (moving) {
               const lead = leg.def.front ? 0.7 : 0.42
               angle = homeAngle * (1 - lead) + motionAngle * lead + (Math.random() - 0.5) * 0.5
               radius =
@@ -2023,16 +2040,30 @@ window.__ModuleLoader__.load({
             leg.from = { x: leg.foot.x, y: leg.foot.y }
             leg.to = { x: tx, y: ty }
             leg.t0 = now
-            leg.dur = moving
-              ? speed > 160
-                ? 90 + Math.random() * 70
-                : 140 + Math.random() * 130
-              : 240 + Math.random() * 120
+            leg.dur = probing
+              ? 300 + Math.random() * 160
+              : moving
+                ? speed > 160
+                  ? 90 + Math.random() * 70
+                  : 140 + Math.random() * 130
+                : 240 + Math.random() * 120
             leg.stepping = true
             leg.lift = 0
-            leg.arc = (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 9)
+            leg.arc =
+              (Math.random() < 0.5 ? -1 : 1) *
+              (probing ? 9 + Math.random() * 7 : 6 + Math.random() * 9)
+            if (probing) {
+              leg.cyber.probe = true
+              leg.cyber.probeAt = now + 5000 + Math.random() * 6000
+            }
             leg.cyber.nextStepAt =
-              now + (speed > 160 ? 240 + Math.random() * 500 : 500 + Math.random() * 1000)
+              now +
+              (probing
+                ? 900 + Math.random() * 700
+                : speed > 160
+                  ? 240 + Math.random() * 500
+                  : 500 + Math.random() * 1000)
+            sim.startle = Math.max(sim.startle, 0.12)
             swinging += 1
           }
         }
@@ -2283,6 +2314,11 @@ window.__ModuleLoader__.load({
                 let swingingNow = 0
                 for (const leg of sim.legs) if (leg.stepping) swingingNow += 1
                 desired *= clamp(1 - swingingNow * 0.08, 0.7, 1)
+                if (now >= sim.nextCyberPauseAt) {
+                  sim.cyberPauseUntil = now + 160 + Math.random() * 260
+                  sim.nextCyberPauseAt = now + 3200 + Math.random() * 3800
+                }
+                if (now < sim.cyberPauseUntil) desired = 0
               }
               if (sim.mode === 'walk' && motionRef.current !== MOTION_CYBER && now < sim.pauseUntil) {
                 desired = 0
@@ -2342,9 +2378,26 @@ window.__ModuleLoader__.load({
           sim.abdomenLag = clamp(-sim.omega * 0.09, -0.18, 0.18)
           sim.startle = Math.max(0, sim.startle - dt * 3.2)
 
-          const swayAmp = speed > 20 ? 0.8 : 0.55
-          sim.sway = Math.sin(now * 0.0032) * swayAmp
-          sim.surge = walking ? Math.sin(sim.gaitPhase * Math.PI * 2) * 0.9 : 0
+          const swayAmp =
+            motionRef.current === MOTION_CYBER
+              ? speed > 20
+                ? 1.25
+                : 0.85
+              : speed > 20
+                ? 0.8
+                : 0.55
+          let sway = Math.sin(now * 0.0032) * swayAmp
+          if (motionRef.current === MOTION_CYBER && sim.plantPulse > 0) {
+            sway += sim.plantPulse * 1.5 * (sim.plantSide || 1)
+            sim.plantPulse = Math.max(0, sim.plantPulse - dt * 5)
+          }
+          sim.sway = sway
+          sim.surge = walking
+            ? Math.sin(sim.gaitPhase * Math.PI * 2) *
+              (motionRef.current === MOTION_CYBER ? 1.3 : 0.9)
+            : motionRef.current === MOTION_CYBER
+              ? Math.sin(now * 0.0011) * 0.35
+              : 0
           const ux = Math.cos(sim.angle)
           const uy = Math.sin(sim.angle)
           const px = -uy
