@@ -1370,10 +1370,7 @@ window.__ModuleLoader__.load({
         pauseUntil: 0,
         nextBurstAt: now + 2000,
         startle: 0,
-        plantPulse: 0,
-        plantSide: 1,
-        nextCyberPauseAt: now + 2600 + Math.random() * 3000,
-        cyberPauseUntil: 0,
+        cyberSpeedFactor: 1,
         omega: 0,
         abdomenLag: 0,
         warp: null,
@@ -1986,9 +1983,6 @@ window.__ModuleLoader__.load({
                 leg.cyber.nextStepAt =
                   now + (speed > 160 ? 260 + Math.random() * 500 : 450 + Math.random() * 900)
                 leg.cyber.probe = false
-                sim.plantPulse = Math.min(1.2, sim.plantPulse + 0.9)
-                sim.plantSide = leg.def.side
-                sim.startle = Math.max(sim.startle, 0.22)
                 swinging = Math.max(0, swinging - 1)
               } else {
                 leg.lift = Math.sin(Math.PI * p)
@@ -1998,9 +1992,13 @@ window.__ModuleLoader__.load({
 
             const hip = legPoint(sim, leg, [leg.def.hip[0], leg.def.hip[1]])
             const distance = Math.hypot(leg.foot.x - hip.x, leg.foot.y - hip.y)
-            const wants = moving
-              ? distance > leg.cyber.limit || now > leg.cyber.nextStepAt
-              : now > leg.cyber.nextStepAt
+            const phase = (sim.gaitPhase + (leg.def.phaseOffset || 0)) % 1
+            const inWindow = !moving || phase < 0.48 || distance > leg.cyber.limit * 1.35
+            const wants =
+              inWindow &&
+              (moving
+                ? distance > leg.cyber.limit || now > leg.cyber.nextStepAt
+                : now > leg.cyber.nextStepAt)
             if (!wants) continue
             if (!moving && swinging > 0) continue
             if (swinging >= maxSwing) continue
@@ -2063,7 +2061,6 @@ window.__ModuleLoader__.load({
                 : speed > 160
                   ? 240 + Math.random() * 500
                   : 500 + Math.random() * 1000)
-            sim.startle = Math.max(sim.startle, 0.12)
             swinging += 1
           }
         }
@@ -2310,15 +2307,14 @@ window.__ModuleLoader__.load({
                   drag += Math.max(0, -(relX * ux + relY * uy))
                 }
                 const averageDrag = drag / Math.max(1, sim.legs.length)
-                desired *= clamp(1 - averageDrag / 90, 0.38, 1)
                 let swingingNow = 0
                 for (const leg of sim.legs) if (leg.stepping) swingingNow += 1
-                desired *= clamp(1 - swingingNow * 0.08, 0.7, 1)
-                if (now >= sim.nextCyberPauseAt) {
-                  sim.cyberPauseUntil = now + 160 + Math.random() * 260
-                  sim.nextCyberPauseAt = now + 3200 + Math.random() * 3800
-                }
-                if (now < sim.cyberPauseUntil) desired = 0
+                const targetFactor =
+                  clamp(1 - averageDrag / 90, 0.38, 1) *
+                  clamp(1 - swingingNow * 0.08, 0.7, 1)
+                sim.cyberSpeedFactor +=
+                  (targetFactor - sim.cyberSpeedFactor) * Math.min(1, dt * 2.5)
+                desired *= sim.cyberSpeedFactor
               }
               if (sim.mode === 'walk' && motionRef.current !== MOTION_CYBER && now < sim.pauseUntil) {
                 desired = 0
@@ -2381,22 +2377,17 @@ window.__ModuleLoader__.load({
           const swayAmp =
             motionRef.current === MOTION_CYBER
               ? speed > 20
-                ? 1.25
-                : 0.85
+                ? 1.05
+                : 0.8
               : speed > 20
                 ? 0.8
                 : 0.55
-          let sway = Math.sin(now * 0.0032) * swayAmp
-          if (motionRef.current === MOTION_CYBER && sim.plantPulse > 0) {
-            sway += sim.plantPulse * 1.5 * (sim.plantSide || 1)
-            sim.plantPulse = Math.max(0, sim.plantPulse - dt * 5)
-          }
-          sim.sway = sway
+          sim.sway = Math.sin(now * 0.0032) * swayAmp
           sim.surge = walking
             ? Math.sin(sim.gaitPhase * Math.PI * 2) *
-              (motionRef.current === MOTION_CYBER ? 1.3 : 0.9)
+              (motionRef.current === MOTION_CYBER ? 1.1 : 0.9)
             : motionRef.current === MOTION_CYBER
-              ? Math.sin(now * 0.0011) * 0.35
+              ? Math.sin(now * 0.0011) * 0.3
               : 0
           const ux = Math.cos(sim.angle)
           const uy = Math.sin(sim.angle)
