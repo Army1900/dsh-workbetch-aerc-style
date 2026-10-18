@@ -1514,11 +1514,8 @@ window.__ModuleLoader__.load({
                   className: 'si-sb-nav__row si-sb-nav__row--group',
                   title: SDD_GROUP_LABEL,
                   'aria-label': `${SDD_GROUP_LABEL}（打开项目看板）`,
-                  'aria-expanded': 'true',
-                  onClick: () => {
-                    setSddCollapsed(false)
-                    selectPanel('dashboard')
-                  }
+                  'aria-expanded': sddCollapsed ? 'false' : 'true',
+                  onClick: () => setSddCollapsed((value) => !value)
                 },
                 h(
                   'span',
