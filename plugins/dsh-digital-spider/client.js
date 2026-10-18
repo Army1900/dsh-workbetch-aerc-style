@@ -40,6 +40,7 @@ window.__ModuleLoader__.load({
     const POLL_MS = 1600
     const BUBBLE_MS = 7800
     const IDEA_MS = 30_000
+    const MOOD_MS = 14_000
     const SESSION_START_COOLDOWN_MS = 24000
     const MAX_QUEUE = 6
     const CHIP_WINDOW_MS = 45 * 60_000
@@ -429,6 +430,26 @@ window.__ModuleLoader__.load({
         'anotherIdea': '再想一个',
         'ideaPeek': '点开看完整点子',
         'thought': '蜘蛛想到',
+        'label.mood': 'MOOD SIGNAL',
+        'mood.positive': '替你高兴',
+        'mood.negative': '陪着你',
+        'emotion.joy': '开心',
+        'emotion.excitement': '兴奋',
+        'emotion.relief': '释然',
+        'emotion.pride': '自豪',
+        'emotion.gratitude': '感激',
+        'emotion.calm': '平静',
+        'emotion.hope': '期待',
+        'emotion.frustration': '烦躁',
+        'emotion.anger': '生气',
+        'emotion.sadness': '难过',
+        'emotion.tired': '疲惫',
+        'emotion.anxiety': '焦虑',
+        'emotion.overwhelm': '有点超载',
+        'emotion.confusion': '迷茫',
+        'emotion.self-doubt': '自我怀疑',
+        'emotion.loneliness': '孤独',
+        'emotion.other': '有点不好受',
         'thinking': '推演中…',
         'genericError': '这次没想出来，稍后再试。',
         'statusTitle': 'DIGITAL SPIDER',
@@ -517,6 +538,26 @@ window.__ModuleLoader__.load({
         'anotherIdea': 'Another idea',
         'ideaPeek': 'Open the full idea',
         'thought': 'SPIDER THOUGHT',
+        'label.mood': 'MOOD SIGNAL',
+        'mood.positive': 'Nice',
+        'mood.negative': 'I’m here',
+        'emotion.joy': 'Joy',
+        'emotion.excitement': 'Excited',
+        'emotion.relief': 'Relief',
+        'emotion.pride': 'Proud',
+        'emotion.gratitude': 'Grateful',
+        'emotion.calm': 'Calm',
+        'emotion.hope': 'Hopeful',
+        'emotion.frustration': 'Frustration',
+        'emotion.anger': 'Anger',
+        'emotion.sadness': 'Sadness',
+        'emotion.tired': 'Tired',
+        'emotion.anxiety': 'Anxiety',
+        'emotion.overwhelm': 'Overwhelmed',
+        'emotion.confusion': 'Confused',
+        'emotion.self-doubt': 'Self-doubt',
+        'emotion.loneliness': 'Lonely',
+        'emotion.other': 'Uncomfortable',
         'thinking': 'Thinking…',
         'genericError': 'Nothing this time. Try again later.',
         'statusTitle': 'DIGITAL SPIDER',
@@ -1369,6 +1410,99 @@ window.__ModuleLoader__.load({
   box-shadow: 0 0 8px var(--ds-amber);
   animation: ds-thought-pulse 1.9s ease-in-out infinite;
 }
+.ds-mood__bubble {
+  --mood-tone: var(--ds-amber);
+  width: 100%;
+  padding: 9px 11px 10px;
+  border: 1px solid color-mix(in srgb, var(--mood-tone) 46%, var(--ds-line));
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--mood-tone) 5%, var(--ds-surface));
+  backdrop-filter: blur(12px) saturate(1.1);
+  box-shadow:
+    0 12px 28px -16px rgba(0, 0, 0, .55),
+    0 0 20px -8px color-mix(in srgb, var(--mood-tone) 42%, transparent);
+  color: var(--ds-text);
+  pointer-events: auto;
+  transform-origin: 0 100%;
+  animation:
+    ds-thought-in .3s cubic-bezier(.2, .9, .3, 1.25) .1s both,
+    ds-thought-float 5.2s ease-in-out .5s infinite;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.ds-mood.is-left .ds-mood__bubble { transform-origin: 100% 100%; }
+.ds-mood.is-below .ds-mood__bubble { transform-origin: 0 0; }
+.ds-mood.is-below.is-left .ds-mood__bubble { transform-origin: 100% 0; }
+.ds-mood__bubble.is-positive { --mood-tone: #9fe0c4; }
+.ds-mood__bubble.is-negative { --mood-tone: var(--ds-amber); }
+.ds-mood__bubble.is-frustration,
+.ds-mood__bubble.is-anger { --mood-tone: #f2a26f; }
+.ds-mood__bubble.is-sadness,
+.ds-mood__bubble.is-tired,
+.ds-mood__bubble.is-loneliness { --mood-tone: #e6b878; }
+.ds-mood__bubble.is-anxiety,
+.ds-mood__bubble.is-overwhelm { --mood-tone: #79d4cf; }
+.ds-mood__bubble.is-confusion,
+.ds-mood__bubble.is-self-doubt { --mood-tone: #9db7d9; }
+.ds-mood__bubble.is-joy,
+.ds-mood__bubble.is-excitement,
+.ds-mood__bubble.is-pride { --mood-tone: #ffd27a; }
+.ds-mood__bubble.is-relief,
+.ds-mood__bubble.is-calm,
+.ds-mood__bubble.is-gratitude,
+.ds-mood__bubble.is-hope { --mood-tone: #9fe0c4; }
+.ds-mood__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--ds-mono);
+  font-size: 7.5px;
+  line-height: 1;
+  letter-spacing: .08em;
+  white-space: nowrap;
+}
+.ds-mood__glyph {
+  flex: none;
+  font-size: 9px;
+  color: var(--mood-tone);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--mood-tone) 60%, transparent);
+  animation: ds-thought-pulse 2.4s ease-in-out infinite;
+}
+.ds-mood__label { color: var(--mood-tone); }
+.ds-mood__emotion {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: color-mix(in srgb, var(--ds-muted) 84%, transparent);
+}
+.ds-mood__close {
+  margin-left: auto;
+  padding: 0 0 0 6px;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--ds-muted) 80%, transparent);
+  font-family: var(--ds-mono);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ds-mood__close:hover { color: var(--ds-text); }
+.ds-mood__text {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: color-mix(in srgb, var(--ds-text) 92%, transparent);
+}
+.ds-mood__from {
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px dashed color-mix(in srgb, var(--ds-line) 66%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ds-mono);
+  font-size: 7.5px;
+  letter-spacing: .04em;
+  color: color-mix(in srgb, var(--ds-muted) 80%, transparent);
+}
 .ds-thought__dot {
   position: absolute;
   border-radius: 50%;
@@ -1726,7 +1860,7 @@ window.__ModuleLoader__.load({
 
 @media (prefers-reduced-motion: reduce) {
   .ds-body-breathe, .ds-core, .ds-chip, .ds-pop, .ds-net__route, .ds-ep__ping,
-  .ds-thought__bubble, .ds-thought__dot, .ds-thought__glow { animation: none !important; }
+  .ds-thought__bubble, .ds-thought__dot, .ds-thought__glow, .ds-mood__bubble, .ds-mood__glyph { animation: none !important; }
 }
 
 @media (max-width: 560px) {
@@ -1814,6 +1948,26 @@ window.__ModuleLoader__.load({
             body: translate('scheduleNowBody'),
             tone: 'alert',
           }
+        case 'mood': {
+          const valence = item.valence === 'positive' ? 'positive' : 'negative'
+          return {
+            label: translate('label.mood'),
+            title: item.title
+              ? format(translate('ideaFrom'), { title: item.title })
+              : translate(`mood.${valence}`),
+            meta: item.emotion
+              ? translate(`emotion.${item.emotion}`)
+              : translate(`mood.${valence}`),
+            body: item.text || '',
+            hint: '',
+            tone: valence === 'positive' ? 'cheer' : 'care',
+            valence,
+            emotion: item.emotion || 'other',
+            moodId: item.moodId || '',
+            sessionId: item.sessionId || '',
+            sessionTitle: item.title || '',
+          }
+        }
         case 'idea': {
           const sessionTitle = item.sessionTitle || item.title || ''
           const skill = item.skill || ''
@@ -2410,6 +2564,9 @@ window.__ModuleLoader__.load({
             format: content.format,
             sessionTitle: content.sessionTitle,
             ideaSource: content.ideaSource,
+            emotion: content.emotion,
+            valence: content.valence,
+            moodId: content.moodId,
           }
           bubbleRef.current = next
           setBubble(next)
@@ -2426,7 +2583,14 @@ window.__ModuleLoader__.load({
             setPlacement(placePop(window.innerWidth / 2, window.innerHeight / 2, false))
           }
           clearTimeout(hideTimerRef.current)
-          const dwell = item.kind === 'idea' ? IDEA_MS : item.kind === 'schedule-now' ? 9000 : BUBBLE_MS
+          const dwell =
+            item.kind === 'mood'
+              ? MOOD_MS
+              : item.kind === 'idea'
+                ? IDEA_MS
+                : item.kind === 'schedule-now'
+                  ? 9000
+                  : BUBBLE_MS
           hideTimerRef.current = window.setTimeout(() => {
             if (apiRef.current) apiRef.current.closeBubble()
           }, dwell)
@@ -2619,6 +2783,48 @@ window.__ModuleLoader__.load({
           return
         }
 
+        if (kind === 'mood') {
+          const moodId = event.moodId
+          if (moodId) {
+            if (bubbleRef.current && bubbleRef.current.moodId === moodId) return
+            if (queueRef.current.some((entry) => entry.moodId === moodId)) return
+            if (sim && sim.pending && sim.pending.moodId === moodId) return
+          }
+          /* 情绪反馈优先于正在显示/赶来的点子，但不打断已经到点的定时任务。 */
+          if (sim && sim.pending && sim.pending.kind === 'idea') {
+            queueRef.current.push({ ...sim.pending, priority: sim.pending.priority || 2 })
+            sim.pending = null
+            sim.mode = 'idle'
+          }
+          if (
+            !panelOpenRef.current &&
+            bubbleRef.current &&
+            bubbleRef.current.kind === 'idea'
+          ) {
+            clearTimeout(hideTimerRef.current)
+            bubbleRef.current = null
+            setBubble(null)
+          }
+          if (apiRef.current) {
+            apiRef.current.enqueue({
+              key: event.id,
+              kind,
+              station: 'mood',
+              at: event.at,
+              title: event.title || '',
+              sessionTitle: event.title || '',
+              sessionId: event.sessionId || '',
+              text: event.text || '',
+              valence: event.valence === 'positive' ? 'positive' : 'negative',
+              emotion: event.emotion || 'other',
+              intensity: event.intensity,
+              moodId,
+              priority: 4,
+            })
+          }
+          return
+        }
+
         if (kind === 'idea') {
           const ideaId = event.ideaId
           if (ideaId) {
@@ -2651,7 +2857,6 @@ window.__ModuleLoader__.load({
               source: event.source || 'model',
               format: Number(event.format) || 3,
               trigger: event.trigger || 'rest',
-              format: 2,
               priority: 2,
             })
           }
@@ -4327,7 +4532,75 @@ window.__ModuleLoader__.load({
                 ),
               )
             : null,
-          bubble && bubble.kind === 'idea' && !ideaOpen
+          bubble && bubble.kind === 'mood'
+            ? h(
+                'div',
+                {
+                  className: `ds-thought ds-mood${placement.above ? ' is-above' : ' is-below'}${
+                    placement.thoughtSide < 0 ? ' is-left' : ''
+                  }`,
+                  role: 'status',
+                  'aria-live': 'polite',
+                },
+                h('span', { className: 'ds-thought__dot ds-thought__dot--1', 'aria-hidden': 'true' }),
+                h('span', { className: 'ds-thought__dot ds-thought__dot--2', 'aria-hidden': 'true' }),
+                h(
+                  'div',
+                  {
+                    className: 'ds-thought__wrap',
+                    style: {
+                      left: `${(placement.thoughtLeft ?? 10).toFixed(1)}px`,
+                      width: `${(placement.thoughtWidth ?? 232).toFixed(1)}px`,
+                    },
+                  },
+                  h(
+                    'div',
+                    {
+                      className: `ds-mood__bubble is-${bubble.valence} is-${bubble.emotion || 'other'}`,
+                      onMouseEnter: holdBubble,
+                      onMouseLeave: releaseBubble,
+                    },
+                    h(
+                      'div',
+                      { className: 'ds-mood__head' },
+                      h(
+                        'span',
+                        { className: 'ds-mood__glyph', 'aria-hidden': 'true' },
+                        bubble.valence === 'positive' ? '✦' : '♥',
+                      ),
+                      h(
+                        'span',
+                        { className: 'ds-mood__label' },
+                        translate(bubble.valence === 'positive' ? 'mood.positive' : 'mood.negative'),
+                      ),
+                      h(
+                        'span',
+                        { className: 'ds-mood__emotion' },
+                        translate(`emotion.${bubble.emotion || 'other'}`),
+                      ),
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'ds-mood__close',
+                          onClick: () => apiRef.current && apiRef.current.closeBubble(),
+                          'aria-label': translate('close'),
+                        },
+                        '×',
+                      ),
+                    ),
+                    h('p', { className: 'ds-mood__text' }, bubble.body),
+                    bubble.sessionTitle
+                      ? h(
+                          'div',
+                          { className: 'ds-mood__from' },
+                          format(translate('ideaFrom'), { title: bubble.sessionTitle }),
+                        )
+                      : null,
+                  ),
+                ),
+              )
+            : bubble && bubble.kind === 'idea' && !ideaOpen
             ? h(
                 'div',
                 {

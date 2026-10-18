@@ -62,6 +62,13 @@ const IDLE_IDEA_FIRST_MS = 150_000
 const IDLE_IDEA_FIRST_JITTER_MS = 120_000
 const IDLE_IDEA_MS = 8 * 60_000
 const IDLE_IDEA_JITTER_MS = 5 * 60_000
+/** 情绪陪伴：低频读最近用户消息，只在明显负向时冒一句。 */
+const EMOTION_FIRST_MS = 20_000
+const EMOTION_CHECK_MS = 45_000
+const MOOD_COOLDOWN_MS = 8 * 60_000
+const EMOTION_MIN_INTENSITY = 0.45
+const EMOTION_MAX_TOKENS = 260
+const EMOTION_CONTEXT_CHARS = 500
 /** 太短的会话不生成点子。 */
 const IDEA_MIN_SESSION_MS = 45_000
 /** openmind 技能目录扫描缓存。 */
@@ -301,6 +308,10 @@ function createState(ctx, config) {
     nextIdeaAt: 0,
     nextIdleIdeaAt:
       Date.now() + IDLE_IDEA_FIRST_MS + Math.floor(Math.random() * IDLE_IDEA_FIRST_JITTER_MS),
+    nextEmotionCheckAt: Date.now() + EMOTION_FIRST_MS,
+    emotionBusy: false,
+    lastMoodAt: 0,
+    lastUserText: new Map(),
     lastIdeaBySession: new Map(),
     pendingIdeaSession: null,
     pendingIdeaTimer: null,
@@ -579,6 +590,175 @@ async function lastMessageText(state, sessionId, type, maxChars) {
     if (text.length > 0) return clip(text, maxChars)
   }
   return ''
+}
+
+const NEGATIVE_EMOTIONS = [
+  'frustration',
+  'anger',
+  'sadness',
+  'tired',
+  'anxiety',
+  'overwhelm',
+  'confusion',
+  'self-doubt',
+  'loneliness',
+]
+
+const POSITIVE_EMOTIONS = ['joy', 'excitement', 'relief', 'pride', 'gratitude', 'calm', 'hope']
+
+const EMOTION_NAMES = [...NEGATIVE_EMOTIONS, ...POSITIVE_EMOTIONS]
+
+function pickEmotionSession(state) {
+  const list = [...state.sessions.values()].filter(
+    (record) => record && !record.subagent && (record.title || record.updatedAt),
+  )
+  list.sort(
+    (a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0),
+  )
+  return list[0] || null
+}
+
+async function recentUserMessages(state, sessionId, limit) {
+  const query = service(state.ctx, 'sessionQuery')
+  if (!query || typeof query.filterEvents !== 'function') return []
+  const docs = await query.filterEvents(sessionId, [
+    { kind: 'type', values: ['user/message'] },
+  ])
+  return (Array.isArray(docs) ? docs : [])
+    .slice(-limit)
+    .map((doc) => (doc && typeof doc.text === 'string' ? doc.text.trim() : ''))
+    .filter(Boolean)
+    .map((text) => clip(text, 300))
+}
+
+/**
+ * 低频、克制地读最近用户消息。只在模型明确判断负向且强度足够时冒一句，
+ * 文本由模型结合上下文生成，不套固定安慰模板。
+ */
+async function checkEmotion(state) {
+  if (state.emotionBusy || state.disposed) return
+  const record = pickEmotionSession(state)
+  if (!record) return
+  state.emotionBusy = true
+  try {
+    const messages = await recentUserMessages(state, record.id, 2)
+    if (messages.length === 0) return
+    const text = messages.join('\n---\n')
+    const fingerprint = `${record.id}:${text}`
+    if (state.lastUserText.get(record.id) === fingerprint) return
+    state.lastUserText.set(record.id, fingerprint)
+
+    const assistantText = await lastMessageText(state, record.id, 'assistant/message', 400)
+    const analysis = await analyzeEmotion(state, record.title, text, assistantText)
+    if (
+      !analysis ||
+      analysis.valence === 'neutral' ||
+      analysis.intensity < EMOTION_MIN_INTENSITY ||
+      !analysis.text
+    ) {
+      return
+    }
+    const now = Date.now()
+    if (now < state.lastMoodAt + MOOD_COOLDOWN_MS) return
+    state.lastMoodAt = now
+    const moodId = `mood-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+    pushEvent(state, 'mood', {
+      moodId,
+      text: analysis.text,
+      valence: analysis.valence,
+      emotion: analysis.emotion,
+      intensity: analysis.intensity,
+      sessionId: record.id,
+      title: record.title || '',
+      at: now,
+    })
+  } catch (error) {
+    console.error('[digital-spider] 情绪感知失败：', error)
+  } finally {
+    state.emotionBusy = false
+  }
+}
+
+async function analyzeEmotion(state, title, userText, assistantText) {
+  const llm = service(state.ctx, 'llm')
+  if (!llm || typeof llm.stream !== 'function') return null
+  const selection = await resolveModel(state.ctx, llm)
+  if (!selection) return null
+
+  const lines = [
+    '你是一只安静的桌面蜘蛛，只根据用户最近说的话感知情绪。不要心理诊断，不要读心，不要推断未说的事。',
+    '只对明显情绪作反馈，不要每句话都接：',
+    '- 负向：烦躁/生气/难过/疲惫/焦虑/超载/迷茫/自我怀疑/孤独；',
+    '- 正向：开心/兴奋/释然/自豪/感激/平静/期待。',
+    '如果负向，写一句 20–50 字的安慰气泡：',
+    '- 先承认他具体遇到的事情或感受，不要泛泛；',
+    '- 不评判、不急着给建议、不要求他振作；',
+    '- 不要用“别难过 / 加油 / 想开点 / 一切都会好”这类套话；',
+    '- 像一个在旁边的小东西，轻、短、有陪伴感，可以留一点空间。',
+    '如果正向，写一句 12–40 字的反馈：',
+    '- 点出他具体完成/高兴的事，和他一起高兴，可以有一点克制的雀跃；',
+    '- 不要泛泛夸“真棒 / 厉害了”，不要马上给下一步或泼冷水；',
+    '- 像一个在旁边的小东西，真诚、轻快。',
+    '如果情绪不明显，valence=neutral，text 留空，emotion=none，intensity=0。',
+    '用用户最近说话的语言。',
+    '',
+    '只输出一个 JSON 对象：',
+    '{"valence":"negative|positive|neutral","emotion":"frustration|anger|sadness|tired|anxiety|overwhelm|confusion|self-doubt|loneliness|joy|excitement|relief|pride|gratitude|calm|hope|none","intensity":0到1,"text":"情绪气泡","evidence":"用户原话里最短的证据，最多30字"}',
+    '',
+    `会话标题：${title || '未命名会话'}`,
+    `用户最近说：${userText}`,
+  ]
+  if (assistantText) lines.push(`助手最近回复：${assistantText}`)
+
+  let text = ''
+  const stream = llm.stream({
+    provider: selection.provider,
+    model: selection.model,
+    system: '你只输出一个合法 JSON 对象；你只做情绪观察，不做诊断。',
+    messages: [{ role: 'user', content: [{ type: 'text', text: lines.join('\n') }] }],
+    temperature: 0.55,
+    maxTokens: EMOTION_MAX_TOKENS,
+    signal: AbortSignal.timeout(25_000),
+  })
+  for await (const chunk of stream) {
+    if (!chunk || typeof chunk !== 'object') continue
+    if (chunk.type === 'text-delta' && typeof chunk.text === 'string') text += chunk.text
+  }
+  return parseEmotion(text, userText, assistantText)
+}
+
+function parseEmotion(raw, userText, assistantText) {
+  if (typeof raw !== 'string') return null
+  const text = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start < 0 || end <= start) return null
+  let data
+  try {
+    data = JSON.parse(text.slice(start, end + 1))
+  } catch {
+    return null
+  }
+  const valence =
+    data.valence === 'positive' || data.valence === 'negative' ? data.valence : 'neutral'
+  if (valence === 'neutral') return { valence: 'neutral' }
+  const allowed = valence === 'positive' ? POSITIVE_EMOTIONS : NEGATIVE_EMOTIONS
+  const intensity = Math.max(0, Math.min(1, Number(data.intensity) || 0))
+  const emotion = allowed.includes(data.emotion) ? data.emotion : 'other'
+  const bubble = cleanField(data.text, 100)
+  if (bubble.length < 4) return null
+  const evidence = cleanField(data.evidence, 60)
+  return {
+    valence,
+    emotion,
+    intensity,
+    text: bubble,
+    evidence,
+    context: clip(`${userText} ${assistantText}`, EMOTION_CONTEXT_CHARS),
+  }
 }
 
 /* ────────────────────────────── 定时任务 ────────────────────────────── */
@@ -1299,6 +1479,12 @@ function tick(state) {
   checkSchedules(state, now)
   pruneAnnouncements(state, now)
   if (now - (state.openmindAt || 0) > OPENMIND_CACHE_MS) refreshOpenmind(state)
+
+  /* 低频情绪感知：只在冷却允许时读最近用户消息。 */
+  if (!state.emotionBusy && now >= state.nextEmotionCheckAt) {
+    state.nextEmotionCheckAt = now + EMOTION_CHECK_MS
+    if (now >= state.lastMoodAt + MOOD_COOLDOWN_MS) void checkEmotion(state)
+  }
 
   /* 没有会话收尾/任务时，蜘蛛也会隔一阵自己冒一个想法。 */
   if (!state.ideaBusy && !state.pendingIdeaTimer && now >= state.nextIdleIdeaAt) {
