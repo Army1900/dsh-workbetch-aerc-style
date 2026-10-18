@@ -1513,7 +1513,7 @@ window.__ModuleLoader__.load({
                   type: 'button',
                   className: 'si-sb-nav__row si-sb-nav__row--group',
                   title: SDD_GROUP_LABEL,
-                  'aria-label': SDD_GROUP_LABEL,
+                  'aria-label': `${SDD_GROUP_LABEL}（打开项目看板）`,
                   'aria-expanded': 'true',
                   onClick: () => {
                     setSddCollapsed(false)
@@ -1542,7 +1542,7 @@ window.__ModuleLoader__.load({
                 className: 'si-sb-nav__row' + (item.child ? ' si-sb-nav__row--child' : ''),
                 'data-on': panel.id === activePanelId ? 'true' : 'false',
                 title: panel.label,
-                'aria-label': panel.label,
+                'aria-label': `${panel.label}（${SDD_GROUP_LABEL}）`,
                 'aria-current': panel.id === activePanelId ? 'page' : undefined,
                 onClick: () => selectPanel(panel.id)
               },
