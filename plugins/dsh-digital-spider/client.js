@@ -40,10 +40,10 @@ window.__ModuleLoader__.load({
     /** 身体绘制坐标缩到 0.26：约 16×5px 的小甲片。 */
     const BODY_SCALE = 0.26
     /** CYBER 模式下，目标超过这个距离就原地开虫洞，而不是爬过去。 */
-    const WORMHOLE_DISTANCE = 340
-    const WARP_OUT_MS = 380
-    const WARP_TRANSFER_MS = 160
-    const WARP_IN_MS = 440
+    const WORMHOLE_DISTANCE = 260
+    const WARP_OUT_MS = 500
+    const WARP_TRANSFER_MS = 200
+    const WARP_IN_MS = 540
 
     const MOTION_KEY = 'dsh-digital-spider.motion'
     const MOTION_ORGANIC = 'organic'
@@ -122,7 +122,7 @@ window.__ModuleLoader__.load({
         'motion.organic': '有机蜘蛛',
         'motion.cyber': '电子爬虫',
         'motion.organicHint': '按距离落脚，像真实蜘蛛：慢速爬行、会停顿。',
-        'motion.cyberHint': '目标驱动的伸缩腿：每条腿沿自己的方向伸出/收回，偶尔单腿远探；不模拟真实步态。',
+        'motion.cyberHint': '足尖抓住页面，身体在足尖之间爬行；腿可伸长缩短，迈步节奏不规律。',
       },
       en: {
         'label.session': 'SESSION LINK',
@@ -172,7 +172,7 @@ window.__ModuleLoader__.load({
         'motion.organic': 'ORGANIC',
         'motion.cyber': 'CYBER',
         'motion.organicHint': 'Distance-based foot planting, like a real spider: slow creep with pauses.',
-        'motion.cyberHint': 'Target-driven telescoping legs: each leg extends and retracts along its own sector, with an occasional long single-leg probe.',
+        'motion.cyberHint': 'Planted feet with a crawling body, telescoping legs, and an irregular step rhythm.',
       },
     }
 
@@ -852,7 +852,7 @@ window.__ModuleLoader__.load({
 .ds-warp__link {
   fill: none;
   stroke: var(--ds-accent);
-  stroke-width: 1;
+  stroke-width: 1.4;
   stroke-dasharray: 3 7;
   animation: ds-warp-flow .7s linear infinite;
 }
@@ -865,20 +865,20 @@ window.__ModuleLoader__.load({
 }
 .ds-portal__ring--outer {
   stroke: var(--ds-accent);
-  stroke-width: 1.2;
+  stroke-width: 2;
   stroke-dasharray: 5 7;
   animation: ds-portal-spin 3.2s linear infinite;
 }
 .ds-portal__ring--mid {
   stroke: var(--ds-amber);
-  stroke-width: .75;
+  stroke-width: 1.1;
   stroke-dasharray: 2 4;
   animation: ds-portal-spin 1.9s linear infinite reverse;
 }
 .ds-portal__ticks {
   fill: none;
   stroke: var(--ds-amber);
-  stroke-width: .8;
+  stroke-width: 1;
   opacity: .55;
   transform-box: fill-box;
   transform-origin: 50% 50%;
@@ -887,7 +887,7 @@ window.__ModuleLoader__.load({
 .ds-portal__pulse {
   fill: none;
   stroke: var(--ds-accent);
-  stroke-width: .8;
+  stroke-width: 1.2;
   opacity: .4;
   transform-box: fill-box;
   transform-origin: 50% 50%;
@@ -1131,13 +1131,9 @@ window.__ModuleLoader__.load({
           now +
           (leg.front ? 1400 + Math.random() * 2200 : 3200 + Math.random() * 4200),
         cyber: {
-          tip: { x: footX, y: footY },
+          limit: 108 + Math.random() * 80,
+          nextStepAt: now + 400 + Math.random() * 1400,
           phase: Math.random() * Math.PI * 2,
-          probeUntil: 0,
-          nextProbeAt: now + 2400 + Math.random() * 4200,
-          probeRadius: 0,
-          pingAt: 0,
-          pinged: true,
         },
       }
     }
@@ -1168,7 +1164,6 @@ window.__ModuleLoader__.load({
         startle: 0,
         omega: 0,
         abdomenLag: 0,
-        nextProbeAt: now + 2200,
         warp: null,
         warpState: null,
         warpScale: 1,
@@ -1184,18 +1179,16 @@ window.__ModuleLoader__.load({
     function resetLegsForMotion(sim, style, now) {
       for (const leg of sim.legs) {
         if (style === MOTION_CYBER) {
-          const angle = Math.atan2(leg.def.home[1], leg.def.home[0]) + sim.angle
-          const radius = 58 + Math.random() * 22
-          leg.cyber.tip = {
-            x: sim.x + Math.cos(angle) * radius,
-            y: sim.y + Math.sin(angle) * radius,
-          }
+          const home = legPoint(sim, leg, [leg.def.home[0], leg.def.home[1]])
+          leg.foot = { x: home.x, y: home.y }
+          leg.from = { x: home.x, y: home.y }
+          leg.to = { x: home.x, y: home.y }
+          leg.stepping = false
+          leg.lift = 0
+          leg.nextAt = 0
+          leg.cyber.limit = 108 + Math.random() * 80
+          leg.cyber.nextStepAt = now + 400 + Math.random() * 1200
           leg.cyber.phase = Math.random() * Math.PI * 2
-          leg.cyber.probeUntil = 0
-          leg.cyber.nextProbeAt = now + 1200 + Math.random() * 3200
-          leg.cyber.probeRadius = 0
-          leg.cyber.pingAt = 0
-          leg.cyber.pinged = true
           continue
         }
         const home = legPoint(sim, leg, [leg.def.home[0], leg.def.home[1]])
@@ -1295,15 +1288,15 @@ window.__ModuleLoader__.load({
     }
 
     const PORTAL_TICKS =
-      'M0 -38L0 -30M27 -27L21 -21M38 0L30 0M27 27L21 21M0 38L0 30M-27 27L-21 21M-38 0L-30 0M-27 -27L-21 -21'
+      'M0 -76L0 -60M54 -54L42 -42M76 0L60 0M54 54L42 42M0 76L0 60M-54 54L-42 42M-76 0L-60 0M-54 -54L-42 -42'
 
     function portalArt() {
       return [
-        h('circle', { key: 'core', className: 'ds-portal__core', r: '15' }),
-        h('circle', { key: 'outer', className: 'ds-portal__ring ds-portal__ring--outer', r: '30' }),
-        h('circle', { key: 'mid', className: 'ds-portal__ring ds-portal__ring--mid', r: '21' }),
+        h('circle', { key: 'core', className: 'ds-portal__core', r: '30' }),
+        h('circle', { key: 'outer', className: 'ds-portal__ring ds-portal__ring--outer', r: '58' }),
+        h('circle', { key: 'mid', className: 'ds-portal__ring ds-portal__ring--mid', r: '42' }),
         h('path', { key: 'ticks', className: 'ds-portal__ticks', d: PORTAL_TICKS }),
-        h('circle', { key: 'pulse', className: 'ds-portal__pulse', r: '36' }),
+        h('circle', { key: 'pulse', className: 'ds-portal__pulse', r: '70' }),
       ]
     }
 
@@ -1710,39 +1703,80 @@ window.__ModuleLoader__.load({
           leg.arc = (leg.def.side * 0.6 + (Math.random() - 0.5) * 0.8) * bow
         }
 
-        const updateCyberLegs = (now, dt) => {
-          const probing = sim.legs.some((leg) => leg.cyber.probeUntil > now)
-          if (!probing && now > sim.nextProbeAt) {
-            const candidates = sim.legs.filter((leg) => now > leg.cyber.nextProbeAt)
-            const leg = candidates[Math.floor(Math.random() * candidates.length)]
-            if (leg) {
-              leg.cyber.probeUntil = now + 540 + Math.random() * 640
-              leg.cyber.nextProbeAt = now + 4800 + Math.random() * 5200
-              leg.cyber.probeRadius =
-                leg.def.front ? 185 + Math.random() * 75 : 145 + Math.random() * 65
-              leg.cyber.pingAt = now + 260
-              leg.cyber.pinged = false
-              sim.nextProbeAt = now + 2200 + Math.random() * 2800
-            }
-          }
+        const updateCyberLegs = (now) => {
+          const speed = Math.hypot(sim.vx, sim.vy)
+          const moving = speed > 5
+          const maxSwing = speed > 160 ? 4 : 3
+          let swinging = 0
+          for (const leg of sim.legs) if (leg.stepping) swinging += 1
 
           for (const leg of sim.legs) {
-            const cyber = leg.cyber
-            const homeAngle = Math.atan2(leg.def.home[1], leg.def.home[0])
-            const angle = sim.angle + homeAngle + Math.sin(now * 0.0005 + cyber.phase) * 0.03
-            const baseRadius =
-              62 + (leg.def.front ? 8 : 0) + Math.sin(now * 0.0008 + cyber.phase) * 5
-            const active = cyber.probeUntil > now
-            const radius = active ? cyber.probeRadius : baseRadius
-            const anchorX = sim.rx + Math.cos(angle) * radius
-            const anchorY = sim.ry + Math.sin(angle) * radius
-            const follow = 1 - Math.exp(-dt * (active ? 7 : 3.6))
-            cyber.tip.x += (anchorX - cyber.tip.x) * follow
-            cyber.tip.y += (anchorY - cyber.tip.y) * follow
-            if (!cyber.pinged && now >= cyber.pingAt) {
-              cyber.pinged = true
-              plantGrip(cyber.tip)
+            if (leg.stepping) {
+              const p = (now - leg.t0) / leg.dur
+              if (p >= 1) {
+                leg.stepping = false
+                leg.foot = { x: leg.to.x, y: leg.to.y }
+                leg.lift = 0
+                plantGrip(leg.foot)
+                leg.cyber.limit = 108 + Math.random() * 90
+                leg.cyber.nextStepAt =
+                  now + (speed > 160 ? 300 + Math.random() * 600 : 650 + Math.random() * 1500)
+                sim.startle = Math.max(sim.startle, 0.16)
+                swinging = Math.max(0, swinging - 1)
+              } else {
+                leg.lift = Math.sin(Math.PI * p)
+              }
+              continue
             }
+
+            const hip = legPoint(sim, leg, [leg.def.hip[0], leg.def.hip[1]])
+            const distance = Math.hypot(leg.foot.x - hip.x, leg.foot.y - hip.y)
+            const wants = moving
+              ? distance > leg.cyber.limit || now > leg.cyber.nextStepAt
+              : now > leg.cyber.nextStepAt
+            if (!wants) continue
+            if (!moving && swinging > 0) continue
+            if (swinging >= maxSwing) continue
+
+            const homeAngle = sim.angle + Math.atan2(leg.def.home[1], leg.def.home[0])
+            const motionAngle = speed > 8 ? Math.atan2(sim.vy, sim.vx) : sim.angle
+            let angle
+            let radius
+            if (moving) {
+              angle = homeAngle * 0.55 + motionAngle * 0.45 + (Math.random() - 0.5) * 0.5
+              radius =
+                (leg.def.front ? 96 : 80) + Math.random() * 90 + (speed > 160 ? 45 : 0)
+            } else {
+              angle = homeAngle + (Math.random() - 0.5) * 0.55
+              radius = 58 + Math.random() * 64
+            }
+            let tx = sim.rx + Math.cos(angle) * radius
+            let ty = sim.ry + Math.sin(angle) * radius
+            const margin = 26
+            tx = clamp(tx, margin, (window.innerWidth || 1200) - margin)
+            ty = clamp(ty, margin, (window.innerHeight || 800) - margin)
+            const dx = tx - hip.x
+            const dy = ty - hip.y
+            const len = Math.hypot(dx, dy)
+            if (len < 48) {
+              const k = 48 / Math.max(0.001, len)
+              tx = hip.x + dx * k
+              ty = hip.y + dy * k
+            }
+            leg.from = { x: leg.foot.x, y: leg.foot.y }
+            leg.to = { x: tx, y: ty }
+            leg.t0 = now
+            leg.dur = moving
+              ? speed > 160
+                ? 90 + Math.random() * 70
+                : 150 + Math.random() * 150
+              : 240 + Math.random() * 120
+            leg.stepping = true
+            leg.lift = 0
+            leg.arc = (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 9)
+            leg.cyber.nextStepAt =
+              now + (speed > 160 ? 280 + Math.random() * 620 : 700 + Math.random() * 1600)
+            swinging += 1
           }
         }
 
@@ -1751,25 +1785,42 @@ window.__ModuleLoader__.load({
             const els = legEls.current[leg.def.index]
             if (!els || !els.femur) continue
             const hip = legPoint(sim, leg, [leg.def.hip[0], leg.def.hip[1]])
-            const cyber = leg.cyber
-            let tipX = cyber.tip.x
-            let tipY = cyber.tip.y
+            let foot = leg.foot
+            let lift = 0
+            if (leg.stepping) {
+              const p = clamp((now - leg.t0) / leg.dur, 0, 1)
+              const e = ease(p)
+              const baseX = lerp(leg.from.x, leg.to.x, e)
+              const baseY = lerp(leg.from.y, leg.to.y, e)
+              const dx = leg.to.x - leg.from.x
+              const dy = leg.to.y - leg.from.y
+              const len = Math.max(0.001, Math.hypot(dx, dy))
+              const px = -dy / len
+              const py = dx / len
+              const arc = Math.sin(Math.PI * p) * leg.arc
+              foot = { x: baseX + px * arc, y: baseY + py * arc }
+              lift = Math.sin(Math.PI * p)
+            }
+
+            let footX = foot.x
+            let footY = foot.y
             const pull = sim.warpLegPull || 0
             if (pull > 0) {
-              const rx = tipX - sim.rx
-              const ry = tipY - sim.ry
+              const rx = footX - sim.rx
+              const ry = footY - sim.ry
               const radius = Math.hypot(rx, ry) * (1 - Math.min(0.96, pull * 0.96))
               const spin = Math.atan2(ry, rx) + (sim.warpSpin || 0)
-              tipX = sim.rx + Math.cos(spin) * radius
-              tipY = sim.ry + Math.sin(spin) * radius
+              footX = sim.rx + Math.cos(spin) * radius
+              footY = sim.ry + Math.sin(spin) * radius
             }
-            const dx = tipX - hip.x
-            const dy = tipY - hip.y
+
+            const dx = footX - hip.x
+            const dy = footY - hip.y
             const len = Math.max(0.001, Math.hypot(dx, dy))
             const nx = -dy / len
             const ny = dx / len
             const amp = 1 + Math.min(3.5, len * 0.02)
-            const wave = now * 0.0008 + cyber.phase
+            const wave = now * 0.0008 + leg.cyber.phase
             const w1 = Math.sin(wave) * amp
             const w2 = Math.sin(wave + 0.9) * amp * 0.8
             const w3 = Math.sin(wave + 1.8) * amp * 0.6
@@ -1785,14 +1836,14 @@ window.__ModuleLoader__.load({
             const p2y = fmt(p2.y)
             const p3x = fmt(p3.x)
             const p3y = fmt(p3.y)
-            const tipXS = fmt(tipX)
-            const tipYS = fmt(tipY)
-            const full = `M${hipX} ${hipY}L${p1x} ${p1y}L${p2x} ${p2y}L${p3x} ${p3y}L${tipXS} ${tipYS}`
+            const footXS = fmt(footX)
+            const footYS = fmt(footY)
+            const full = `M${hipX} ${hipY}L${p1x} ${p1y}L${p2x} ${p2y}L${p3x} ${p3y}L${footXS} ${footYS}`
 
             setAttr(els.under, 'd', full)
             setAttr(els.femur, 'd', `M${hipX} ${hipY}L${p1x} ${p1y}`)
             setAttr(els.tibia, 'd', `M${p1x} ${p1y}L${p2x} ${p2y}`)
-            setAttr(els.tarsus, 'd', `M${p2x} ${p2y}L${p3x} ${p3y}L${tipXS} ${tipYS}`)
+            setAttr(els.tarsus, 'd', `M${p2x} ${p2y}L${p3x} ${p3y}L${footXS} ${footYS}`)
             setAttr(els.trace, 'd', full)
             setAttr(els.hip, 'cx', hipX)
             setAttr(els.hip, 'cy', hipY)
@@ -1803,21 +1854,21 @@ window.__ModuleLoader__.load({
             setAttr(els.ankle, 'cx', p2x)
             setAttr(els.ankle, 'cy', p2y)
             setAttr(els.ankle, 'r', 0.55)
-            setAttr(els.foot, 'cx', tipXS)
-            setAttr(els.foot, 'cy', tipYS)
-            setAttr(els.foot, 'r', '0.92')
-            setAttr(els.foot, 'opacity', '1')
-            setAttr(els.footShadow, 'cx', (tipX + 1.6).toFixed(2))
-            setAttr(els.footShadow, 'cy', (tipY + 2.2).toFixed(2))
+            setAttr(els.foot, 'cx', footXS)
+            setAttr(els.foot, 'cy', footYS)
+            setAttr(els.foot, 'r', (0.92 - lift * 0.2).toFixed(2))
+            setAttr(els.foot, 'opacity', (1 - lift * 0.3).toFixed(2))
+            setAttr(els.footShadow, 'cx', (footX + 1.4).toFixed(2))
+            setAttr(els.footShadow, 'cy', (footY + 2.2).toFixed(2))
             setAttr(els.footShadow, 'r', 1.4)
-            setAttr(els.footShadow, 'opacity', '0.18')
-            const sclaw = 2.4
+            setAttr(els.footShadow, 'opacity', (0.18 - lift * 0.1).toFixed(2))
+            const sclaw = 2.2
             setAttr(
               els.claw,
               'd',
-              `M${tipXS} ${(tipY - sclaw).toFixed(2)}L${(tipX + sclaw).toFixed(2)} ${tipYS}L${tipXS} ${(tipY + sclaw).toFixed(2)}L${(tipX - sclaw).toFixed(2)} ${tipYS}Z`,
+              `M${footXS} ${(footY - sclaw).toFixed(2)}L${(footX + sclaw).toFixed(2)} ${footYS}L${footXS} ${(footY + sclaw).toFixed(2)}L${(footX - sclaw).toFixed(2)} ${footYS}Z`,
             )
-            setAttr(els.claw, 'opacity', '0.82')
+            setAttr(els.claw, 'opacity', (0.82 - lift * 0.4).toFixed(2))
           }
         }
 
@@ -1835,7 +1886,7 @@ window.__ModuleLoader__.load({
             sim.warpState = {
               from: w.from,
               to: w.to,
-              aScale: 0.35 + e * 0.85,
+              aScale: 0.35 + e * 0.95,
               aOpacity: Math.min(1, p * 5),
               bScale: 0,
               bOpacity: 0,
@@ -1866,9 +1917,9 @@ window.__ModuleLoader__.load({
             sim.warpState = {
               from: w.from,
               to: w.to,
-              aScale: 1.2 * (1 - p),
+              aScale: 1.3 * (1 - p),
               aOpacity: 1 - p,
-              bScale: 0.35 + p * 0.85,
+              bScale: 0.35 + p * 0.95,
               bOpacity: p,
               link: Math.sin(Math.PI * p) * 0.95,
             }
@@ -1894,7 +1945,7 @@ window.__ModuleLoader__.load({
               to: w.to,
               aScale: 0,
               aOpacity: 0,
-              bScale: 0.35 + Math.min(1, p * 1.6) * 0.85,
+              bScale: 0.35 + Math.min(1, p * 1.6) * 0.95,
               bOpacity: Math.min(1, p * 5) * fade,
               link: Math.max(0, 0.6 - p * 2),
             }
@@ -1938,7 +1989,7 @@ window.__ModuleLoader__.load({
               sim.mode === 'run'
                 ? RUN_SPEED
                 : motionRef.current === MOTION_CYBER
-                  ? 76
+                  ? 68
                   : WALK_SPEED
             if (dist <= 4) {
               sim.x = sim.target.x
@@ -2031,7 +2082,7 @@ window.__ModuleLoader__.load({
           sim.ry = sim.y + py * sim.sway + uy * sim.surge
 
           if (motionRef.current === MOTION_CYBER) {
-            updateCyberLegs(now, dt)
+            updateCyberLegs(now)
             return
           }
 

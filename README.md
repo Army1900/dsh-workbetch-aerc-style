@@ -10,7 +10,7 @@ AERC 风格的 DeepSeek Harness 工作站插件集合。三个插件仍然是**�
 | --- | --- | --- | --- |
 | `plugins/dsh-scifi-industrial` | `dsh-scifi-industrial` | 主题 bundle | AERC 重工业终端主题：启动序列、常驻机架、侧栏 chrome 接管、观测状态条。注意它会在 patch 里禁用宿主 `ui-sidebar` 并重新声明侧栏；停用/回退说明见插件自己的 README。 |
 | `plugins/dsh-news-wall` | `dsh-news-wall` | 面板插件（profile patch 安装） | Mac 风格时事大屏：多源新闻聚合、偏好解析、Host 端点 + 浏览器面板。`lib/` 是构建产物，`src/` 是源。 |
-| `plugins/dsh-digital-spider` | `dsh-digital-spider` | 宠物 overlay | 俯视八足宠物：`ORGANIC` 有机步态与 `CYBER` 电子伸缩腿两种动效，可在状态面板切换；远距目标会开信息流虫洞。 |
+| `plugins/dsh-digital-spider` | `dsh-digital-spider` | 宠物 overlay | 俯视八足宠物：`ORGANIC` 有机步态与 `CYBER` 足尖抓页、伸缩腿的不规律爬行两种动效，可在状态面板切换；远距目标会开信息流虫洞。 |
 
 ## 目录
 
