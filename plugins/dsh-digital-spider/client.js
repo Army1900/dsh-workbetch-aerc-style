@@ -286,6 +286,7 @@ window.__ModuleLoader__.load({
         'close': '关闭',
         'dismiss': '知道了',
         'anotherIdea': '再想一个',
+        'ideaPeek': '点开看完整点子',
         'thinking': '推演中…',
         'genericError': '这次没想出来，稍后再试。',
         'statusTitle': 'DIGITAL SPIDER',
@@ -372,6 +373,7 @@ window.__ModuleLoader__.load({
         'close': 'Close',
         'dismiss': 'Got it',
         'anotherIdea': 'Another idea',
+        'ideaPeek': 'Open the full idea',
         'thinking': 'Thinking…',
         'genericError': 'Nothing this time. Try again later.',
         'statusTitle': 'DIGITAL SPIDER',
@@ -1029,6 +1031,99 @@ window.__ModuleLoader__.load({
   to { opacity: 1; translate: 0 0; }
 }
 
+/* ── 想法气泡：点子先只露一句标题，点开才是完整卡片 ───────────── */
+.ds-thought { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+.ds-thought__wrap {
+  position: absolute;
+  display: flex;
+  pointer-events: none;
+}
+.ds-thought.is-above .ds-thought__wrap { bottom: 40px; align-items: flex-end; }
+.ds-thought.is-below .ds-thought__wrap { top: 40px; align-items: flex-start; }
+.ds-thought.is-left .ds-thought__wrap { justify-content: flex-end; }
+.ds-thought__bubble {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
+  padding: 9px 15px 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--ds-accent) 34%, var(--ds-line));
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--ds-surface) 92%, transparent);
+  backdrop-filter: blur(12px) saturate(1.1);
+  box-shadow:
+    0 12px 28px -16px rgba(0, 0, 0, .55),
+    0 0 18px -8px color-mix(in srgb, var(--ds-accent) 45%, transparent);
+  color: var(--ds-text);
+  font-family: var(--ds-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+  transform-origin: 0 100%;
+  animation:
+    ds-thought-in .34s cubic-bezier(.2, .9, .3, 1.25) .14s both,
+    ds-thought-float 4.6s ease-in-out .5s infinite;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.ds-thought.is-left .ds-thought__bubble { transform-origin: 100% 100%; }
+.ds-thought.is-below .ds-thought__bubble { transform-origin: 0 0; }
+.ds-thought.is-below.is-left .ds-thought__bubble { transform-origin: 100% 0; }
+.ds-thought__bubble:hover {
+  border-color: color-mix(in srgb, var(--ds-accent) 70%, var(--ds-line));
+  box-shadow:
+    0 12px 28px -16px rgba(0, 0, 0, .55),
+    0 0 22px -6px color-mix(in srgb, var(--ds-accent) 60%, transparent);
+}
+.ds-thought__bubble:focus-visible { outline: 2px solid var(--ds-accent); outline-offset: 2px; }
+.ds-thought__text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.ds-thought__glow {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--ds-amber);
+  box-shadow: 0 0 8px var(--ds-amber);
+  animation: ds-thought-pulse 1.9s ease-in-out infinite;
+}
+.ds-thought__dot {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--ds-accent) 45%, var(--ds-line));
+  background: color-mix(in srgb, var(--ds-surface) 92%, transparent);
+  pointer-events: none;
+  animation: ds-thought-in .24s ease-out both;
+}
+.ds-thought__dot--1 { width: 5px; height: 5px; left: 7px; }
+.ds-thought__dot--2 { width: 9px; height: 9px; left: 14px; animation-delay: .07s; }
+.ds-thought.is-above .ds-thought__dot--1 { bottom: 15px; }
+.ds-thought.is-above .ds-thought__dot--2 { bottom: 25px; }
+.ds-thought.is-below .ds-thought__dot--1 { top: 15px; }
+.ds-thought.is-below .ds-thought__dot--2 { top: 25px; }
+.ds-thought.is-left .ds-thought__dot--1 { left: -12px; }
+.ds-thought.is-left .ds-thought__dot--2 { left: -23px; }
+@keyframes ds-thought-in {
+  from { opacity: 0; scale: .4; }
+  to { opacity: 1; scale: 1; }
+}
+@keyframes ds-thought-float {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -2px; }
+}
+@keyframes ds-thought-pulse {
+  0%, 100% { opacity: .55; }
+  50% { opacity: 1; }
+}
+
 /* ── 动效选择 ───────────────────────────────────────────────── */
 .ds-motion { gap: 7px; }
 .ds-seg { display: flex; gap: 4px; }
@@ -1356,7 +1451,8 @@ window.__ModuleLoader__.load({
 @keyframes ds-cyber-spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .ds-body-breathe, .ds-core, .ds-chip, .ds-pop, .ds-net__route, .ds-ep__ping { animation: none !important; }
+  .ds-body-breathe, .ds-core, .ds-chip, .ds-pop, .ds-net__route, .ds-ep__ping,
+  .ds-thought__bubble, .ds-thought__dot, .ds-thought__glow { animation: none !important; }
 }
 
 @media (max-width: 560px) {
@@ -1813,7 +1909,11 @@ window.__ModuleLoader__.load({
       const left = clamp(-popWidth / 2, 12 - x, width - popWidth - 12 - x)
       const notch = clamp(-left, 18, popWidth - 18)
       const above = y > (isPanel ? 420 : 285)
-      return { left, notch, above }
+      /* 想法气泡：优先浮在蜘蛛右上方，靠右边缘时翻到左侧。 */
+      const thoughtWidth = Math.min(232, width - 28)
+      const thoughtLeft = clamp(10, 12 - x, width - thoughtWidth - 12 - x)
+      const thoughtSide = thoughtLeft + thoughtWidth / 2 >= 0 ? 1 : -1
+      return { left, notch, above, thoughtLeft, thoughtWidth, thoughtSide }
     }
 
     function legPoint(sim, leg, local) {
@@ -1933,6 +2033,8 @@ window.__ModuleLoader__.load({
       const [skillChoice, setSkillChoice] = React.useState('auto')
       const [dismissedIds, setDismissedIds] = React.useState(() => new Set(readDismissedIdeaIds()))
       const [copyDone, setCopyDone] = React.useState(false)
+      /* 点子先以想法气泡出现，只有点开后才展开成完整卡片。 */
+      const [ideaOpen, setIdeaOpen] = React.useState(false)
       const [, setClock] = React.useState(0)
 
       const simRef = React.useRef(null)
@@ -2039,6 +2141,7 @@ window.__ModuleLoader__.load({
           setBubble(next)
           setIdeaError(false)
           setCopyDone(false)
+          setIdeaOpen(false)
           if (sim) {
             sim.mode = 'perch'
             sim.pending = null
@@ -3576,7 +3679,15 @@ window.__ModuleLoader__.load({
         clearTimeout(hideTimerRef.current)
         hideTimerRef.current = window.setTimeout(() => {
           if (apiRef.current) apiRef.current.closeBubble()
-        }, 3200)
+        }, ideaOpen ? 12_000 : 3200)
+      }
+
+      const openIdea = () => {
+        clearTimeout(hideTimerRef.current)
+        setIdeaOpen(true)
+        hideTimerRef.current = window.setTimeout(() => {
+          if (apiRef.current) apiRef.current.closeBubble()
+        }, IDEA_MS)
       }
 
       const now = Date.now() + offsetRef.current
@@ -3942,7 +4053,50 @@ window.__ModuleLoader__.load({
                 ),
               )
             : null,
-          bubble
+          bubble && bubble.kind === 'idea' && !ideaOpen
+            ? h(
+                'div',
+                {
+                  className: `ds-thought${placement.above ? ' is-above' : ' is-below'}${
+                    placement.thoughtSide < 0 ? ' is-left' : ''
+                  }`,
+                  role: 'status',
+                  'aria-live': 'polite',
+                },
+                h('span', { className: 'ds-thought__dot ds-thought__dot--1', 'aria-hidden': 'true' }),
+                h('span', { className: 'ds-thought__dot ds-thought__dot--2', 'aria-hidden': 'true' }),
+                h(
+                  'div',
+                  {
+                    className: 'ds-thought__wrap',
+                    style: {
+                      left: `${(placement.thoughtLeft ?? 10).toFixed(1)}px`,
+                      width: `${(placement.thoughtWidth ?? 232).toFixed(1)}px`,
+                    },
+                  },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'ds-thought__bubble',
+                      onClick: openIdea,
+                      onMouseEnter: holdBubble,
+                      onMouseLeave: releaseBubble,
+                      onFocus: holdBubble,
+                      onBlur: releaseBubble,
+                      'aria-label': `${bubble.ideaTitle || bubble.suggestion || bubble.title} · ${translate('ideaPeek')}`,
+                      title: translate('ideaPeek'),
+                    },
+                    h('span', { className: 'ds-thought__glow', 'aria-hidden': 'true' }),
+                    h(
+                      'span',
+                      { className: 'ds-thought__text' },
+                      bubble.ideaTitle || bubble.suggestion || bubble.title,
+                    ),
+                  ),
+                ),
+              )
+            : bubble
             ? h(
                 'div',
                 {
