@@ -135,6 +135,124 @@ window.__ModuleLoader__.load({
       }
     }
 
+    function shortenThought(value, max) {
+      const text = String(value || '').replace(/\s+/g, ' ').trim()
+      if (text.length <= max) return text
+      return `${text.slice(0, Math.max(0, max - 1))}…`
+    }
+
+    function firstPoemLines(value, count) {
+      if (typeof value !== 'string') return ''
+      return value
+        .replace(/\r\n?/g, '\n')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(0, count)
+        .join('\n')
+    }
+
+    function thoughtHead(idea, translate) {
+      const label = [idea.skillLabel || idea.skill, idea.mode].filter(Boolean).join(' · ')
+      return h(
+        'div',
+        { className: 'ds-thought__head', key: 'head' },
+        h('span', { className: 'ds-thought__form' }, `${translate('thought')} · ${label}`),
+        h('span', { className: 'ds-thought__peek', 'aria-hidden': 'true' }, '↗'),
+      )
+    }
+
+    function thoughtContent(idea, translate) {
+      const a = idea.artifact || {}
+      const nodes = [thoughtHead(idea, translate)]
+      switch (idea.skill) {
+        case 'poetic-essence':
+          nodes.push(
+            h(
+              'div',
+              { className: 'ds-thought__poem', key: 'poem' },
+              firstPoemLines(a.poem, 3) || idea.ideaTitle || '',
+            ),
+          )
+          if (a.attribution) {
+            nodes.push(
+              h(
+                'div',
+                { className: 'ds-thought__attribution', key: 'attr' },
+                `—— ${a.attribution}`,
+              ),
+            )
+          }
+          break
+        case 'deep-dream':
+          nodes.push(
+            h(
+              'div',
+              { className: 'ds-thought__dream', key: 'dream' },
+              shortenThought(a.dream || idea.ideaTitle, 110),
+            ),
+          )
+          break
+        case 'constraint-flip':
+          nodes.push(
+            h(
+              'div',
+              { className: 'ds-thought__flip', key: 'flip' },
+              h('span', { className: 'ds-thought__constraint' }, shortenThought(a.constraint, 64)),
+              h('span', { className: 'ds-thought__arrow', 'aria-hidden': 'true' }, '→'),
+              h('span', { className: 'ds-thought__flipped' }, shortenThought(a.flipped, 100)),
+            ),
+          )
+          break
+        case 'cross-domain':
+          nodes.push(
+            h(
+              'div',
+              { className: 'ds-thought__analogy', key: 'analogy' },
+              shortenThought(a.analogy || a.insight || idea.ideaTitle, 110),
+            ),
+          )
+          break
+        case 'clarify-intent':
+          nodes.push(
+            h(
+              'div',
+              { className: 'ds-thought__question', key: 'question' },
+              `“${shortenThought(a.question || a.intent || idea.ideaTitle, 100)}”`,
+            ),
+          )
+          break
+        case 'act-on-ground':
+          nodes.push(
+            h(
+              'div',
+              { className: 'ds-thought__step', key: 'step' },
+              h('span', { className: 'ds-thought__check', 'aria-hidden': 'true' }, '▸'),
+              h('span', null, shortenThought(a.step || idea.suggestion || idea.ideaTitle, 110)),
+            ),
+          )
+          break
+        case 'reflect-anchor':
+          nodes.push(
+            h(
+              'div',
+              { className: 'ds-thought__anchor', key: 'anchor' },
+              shortenThought(a.anchor || a.lesson || idea.ideaTitle, 110),
+            ),
+          )
+          break
+        default:
+          nodes.push(
+            h(
+              'div',
+              { className: 'ds-thought__text', key: 'text' },
+              shortenThought(ideaPeekText(idea), 110),
+            ),
+          )
+      }
+      return nodes
+    }
+
     /** 想法气泡的“露一句”：执行型露核心，诗/梦境只露标题，点开才展开全文。 */
     function ideaPeekText(idea) {
       if (!idea) return ''
@@ -310,6 +428,7 @@ window.__ModuleLoader__.load({
         'dismiss': '知道了',
         'anotherIdea': '再想一个',
         'ideaPeek': '点开看完整点子',
+        'thought': '蜘蛛想到',
         'thinking': '推演中…',
         'genericError': '这次没想出来，稍后再试。',
         'statusTitle': 'DIGITAL SPIDER',
@@ -397,6 +516,7 @@ window.__ModuleLoader__.load({
         'dismiss': 'Got it',
         'anotherIdea': 'Another idea',
         'ideaPeek': 'Open the full idea',
+        'thought': 'SPIDER THOUGHT',
         'thinking': 'Thinking…',
         'genericError': 'Nothing this time. Try again later.',
         'statusTitle': 'DIGITAL SPIDER',
@@ -1101,6 +1221,137 @@ window.__ModuleLoader__.load({
     0 0 22px -6px color-mix(in srgb, var(--ds-accent) 60%, transparent);
 }
 .ds-thought__bubble:focus-visible { outline: 2px solid var(--ds-accent); outline-offset: 2px; }
+.ds-thought__content {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+.ds-thought__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--ds-mono);
+  font-size: 7.5px;
+  line-height: 1;
+  letter-spacing: .08em;
+  color: color-mix(in srgb, var(--ds-accent) 82%, var(--ds-muted));
+  white-space: nowrap;
+}
+.ds-thought__form {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ds-thought__peek {
+  margin-left: auto;
+  font-size: 9px;
+  opacity: .55;
+}
+.ds-thought__poem {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  font-family: var(--ds-serif, "Songti SC", "STSong", "Noto Serif SC", Georgia, serif);
+  font-size: 12.5px;
+  line-height: 1.7;
+  letter-spacing: .04em;
+  color: var(--ds-text);
+}
+.ds-thought__attribution {
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ds-mono);
+  font-size: 7.5px;
+  letter-spacing: .03em;
+  color: color-mix(in srgb, var(--ds-muted) 84%, transparent);
+}
+.ds-thought__dream {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-style: italic;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--ds-text) 88%, transparent);
+}
+.ds-thought__flip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.ds-thought__constraint {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: color-mix(in srgb, var(--ds-muted) 88%, transparent);
+}
+.ds-thought__arrow { color: var(--ds-accent); font-family: var(--ds-mono); font-size: 9px; }
+.ds-thought__flipped {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: color-mix(in srgb, var(--ds-text) 92%, transparent);
+}
+.ds-thought__analogy {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--ds-text) 86%, transparent);
+}
+.ds-thought__question {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-family: var(--ds-serif, "Songti SC", "STSong", Georgia, serif);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ds-text);
+}
+.ds-thought__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.ds-thought__step > span:last-child {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ds-thought__check {
+  flex: none;
+  padding-top: 1px;
+  color: var(--ds-accent);
+  font-family: var(--ds-mono);
+  font-size: 9px;
+}
+.ds-thought__anchor {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  padding-left: 7px;
+  border-left: 1px solid var(--ds-amber);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--ds-text) 88%, transparent);
+}
 .ds-thought__text {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -4111,11 +4362,7 @@ window.__ModuleLoader__.load({
                       title: translate('ideaPeek'),
                     },
                     h('span', { className: 'ds-thought__glow', 'aria-hidden': 'true' }),
-                    h(
-                      'span',
-                      { className: 'ds-thought__text' },
-                      ideaPeekText(bubble),
-                    ),
+                    h('div', { className: 'ds-thought__content' }, ...thoughtContent(bubble, translate)),
                   ),
                 ),
               )

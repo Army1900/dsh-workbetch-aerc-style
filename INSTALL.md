@@ -160,7 +160,7 @@ ln -sfn "$SDD_DIR" "$PROFILE_DIR/node_modules/dsh-e2e-dev-sdd"
 
 ## 4. 安装 OpenMind 技能集合（蜘蛛点子用）
 
-`dsh-digital-spider` 在生成点子时会读取本地 OpenMind 技能集合。自动点子走两轮模型调用：第一轮只做技能路由（7 个技能，选一个技能和模式），第二轮按该技能自己的输出契约生成诗/梦境/反转/类比等形态；状态面板里也可以手动指定形态。**OpenMind 不是 DSH bundle，不要 `install_bundle`；它只是集合外的一份 Markdown 数据。**
+`dsh-digital-spider` 在生成点子时会读取本地 OpenMind 技能集合。自动点子走两轮模型调用：第一轮只做技能路由（7 个技能，选一个技能和模式），第二轮按该技能自己的输出契约生成诗/梦境/反转/类比等形态。会话收尾会触发，空闲时也会低频自己冒（首次约 2.5–4.5 分钟，之后约 8–14 分钟）；状态面板里也可以手动指定形态。**OpenMind 不是 DSH bundle，不要 `install_bundle`；它只是集合外的一份 Markdown 数据。**
 
 ```sh
 mkdir -p "$EXTERNAL_DIR"

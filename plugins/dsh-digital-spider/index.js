@@ -57,6 +57,11 @@ const IDEA_GAP_MS = 2 * 60_000
 const SESSION_IDEA_COOLDOWN_MS = 20 * 60_000
 /** 收尾后等几秒再生成，让最后一条消息落盘。 */
 const IDEA_DEBOUNCE_MS = 2_000
+/** 空闲时蜘蛛自己找点子：首次稍早，之后低频。 */
+const IDLE_IDEA_FIRST_MS = 150_000
+const IDLE_IDEA_FIRST_JITTER_MS = 120_000
+const IDLE_IDEA_MS = 8 * 60_000
+const IDLE_IDEA_JITTER_MS = 5 * 60_000
 /** 太短的会话不生成点子。 */
 const IDEA_MIN_SESSION_MS = 45_000
 /** openmind 技能目录扫描缓存。 */
@@ -294,6 +299,8 @@ function createState(ctx, config) {
     ideas: [],
     ideaBusy: false,
     nextIdeaAt: 0,
+    nextIdleIdeaAt:
+      Date.now() + IDLE_IDEA_FIRST_MS + Math.floor(Math.random() * IDLE_IDEA_FIRST_JITTER_MS),
     lastIdeaBySession: new Map(),
     pendingIdeaSession: null,
     pendingIdeaTimer: null,
@@ -698,7 +705,14 @@ async function produceIdea(state, trigger, requestedSessionId, requestedSkill, r
     if (!context.userText && !context.assistantText) return null
 
     /* 第一轮：模型先选技能和模式；手动指定时跳过。 */
-    const route = await routeIdea(state, pick.title, context, requestedSkill, requestedMode)
+    const route = await routeIdea(
+      state,
+      pick.title,
+      context,
+      requestedSkill,
+      requestedMode,
+      trigger,
+    )
     if (!route) return null
 
     let payload = null
@@ -845,7 +859,7 @@ async function generateModelIdea(state, title, context, skillName, mode) {
   return parseSkillPayload(text, skillName, mode)
 }
 
-async function routeIdea(state, title, context, requestedSkill, requestedMode) {
+async function routeIdea(state, title, context, requestedSkill, requestedMode, trigger) {
   const manual = normalizeRoute(requestedSkill, requestedMode)
   if (manual) return manual
 
@@ -862,6 +876,9 @@ async function routeIdea(state, title, context, requestedSkill, requestedMode) {
           '你是数字蜘蛛的技能路由器。只选一个 OpenMind 技能和一个模式，让点子的形态真正改变。',
           '先贴合会话此刻；如果最近连续使用同一个技能，就换一个合适的形态；没有自然时机不要硬读诗。',
           '会话刚完成/收尾：poetic-essence（WRITE 或 READ）或 reflect-anchor；卡住/反复：constraint-flip 或 deep-dream；需要借视角：cross-domain；目标不清：clarify-intent；要执行：act-on-ground。',
+          trigger === 'idle'
+            ? '这是蜘蛛在空闲时自己冒出来的想法：优先从诗意/梦境/反转/类比里选一个贴合会话的形态，不要总给执行步骤；只有当会话确实卡在落地时才选事上练。'
+            : '',
           '',
           '技能目录（skill 必须是下列名字；mode 必须在该技能 modes 内）：',
           skillCatalog(state),
@@ -1282,6 +1299,12 @@ function tick(state) {
   checkSchedules(state, now)
   pruneAnnouncements(state, now)
   if (now - (state.openmindAt || 0) > OPENMIND_CACHE_MS) refreshOpenmind(state)
+
+  /* 没有会话收尾/任务时，蜘蛛也会隔一阵自己冒一个想法。 */
+  if (!state.ideaBusy && !state.pendingIdeaTimer && now >= state.nextIdleIdeaAt) {
+    state.nextIdleIdeaAt = now + IDLE_IDEA_MS + Math.floor(Math.random() * IDLE_IDEA_JITTER_MS)
+    if (now >= state.nextIdeaAt) void produceIdea(state, 'idle')
+  }
 
   /* 控制地图规模：保留最近活跃的 120 个会话。 */
   if (state.sessions.size > 120) {
