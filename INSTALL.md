@@ -9,6 +9,7 @@
 - 能访问 GitHub 上的两个仓库：
   - `git@github.com:Army1900/dsh-workbetch-aerc-style.git`（本集合）
   - `git@github.com:Army1900/dsh-e2e-dev-sdd.git`（SDD，独立安装）
+  - `git@github.com:Army1900/openmind.git`（OpenMind 技能集合，蜘蛛点子使用）
 - 桌面版的 profile 由应用管理，`dsh --profile desktop` 会被拒绝；不要用 `dsh plugin --profile desktop`。优先使用 DSH 的 Plugin Manager（AI 使用 `plugin_manager` 工具；GUI 里是插件管理里的安装 bundle）。
 
 约定以下变量：
@@ -19,6 +20,7 @@ DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 PROFILE_DIR="$DSH_HOME/profiles/desktop"   # Web profile 换成 profiles/web
 EXTERNAL_DIR="$HOME/WorkSpace-dsh/external"
 SDD_DIR="$EXTERNAL_DIR/dsh-e2e-dev-sdd"
+OPENMIND_DIR="$EXTERNAL_DIR/openmind"
 ```
 
 手动改 `package.json` 或 `cordis.patch.yml` 之前，先备份两个文件：
@@ -156,7 +158,30 @@ ln -sfn "$SDD_DIR" "$PROFILE_DIR/node_modules/dsh-e2e-dev-sdd"
 
 桌面版必须完全退出重开。Web profile 可以使用 SDD README 里的 `dsh plugin --profile web add ...` / `github:Army1900/dsh-e2e-dev-sdd`；桌面版不要用这条命令。
 
-## 4. 验证
+## 4. 安装 OpenMind 技能集合（蜘蛛点子用）
+
+`dsh-digital-spider` 在生成点子时会读取本地 OpenMind 技能集合：加载全部技能目录，按会话内容选 1–2 个技能，把技能说明和会话上下文一起交给模型，最后输出结构化的 `title / suggestion / rationale / skill`。**OpenMind 不是 DSH bundle，不要 `install_bundle`；它只是集合外的一份 Markdown 数据。**
+
+```sh
+mkdir -p "$EXTERNAL_DIR"
+git clone git@github.com:Army1900/openmind.git "$OPENMIND_DIR"
+find "$OPENMIND_DIR/plugins" -name SKILL.md | wc -l
+# 期望：7
+```
+
+不需要构建，也没有运行时依赖。蜘蛛按以下顺序自动发现：
+
+1. 插件配置 `openmindDir`；
+2. 环境变量 `DSH_OPENMIND_DIR`；
+3. `$DSH_HOME/openmind`；
+4. `$HOME/WorkSpace-dsh/external/openmind`（本节默认路径）；
+5. `$HOME/WorkSpace/external/openmind`。
+
+如果克隆到别处，设置 `DSH_OPENMIND_DIR`，或在插件配置里写 `openmindDir`。源码不进入 `dsh-workbetch-aerc-style`；仓库的 `.gitignore` 已忽略 `external/`，防止误提交。
+
+验证：`GET /dsh-digital-spider/state` 的 `openmind.available` 应为 `true`，`skillCount` 为 `7`；否则看第 7 节。
+
+## 5. 验证
 
 ```sh
 cd "$WORKBENCH_DIR"
@@ -175,27 +200,30 @@ PY
 
 - 四个包都能解析，三个集合插件指向 `$WORKBENCH_DIR/plugins/...`，SDD 指向 `$SDD_DIR`。
 - 主题/启动序列、News Wall、Digital Spider 可见；SDD 的「项目开发」分组可见。
-- `GET /dsh-digital-spider/state` 返回 200，`running` 字段正常。
+- `GET /dsh-digital-spider/state` 返回 200，`running` 字段正常；`openmind.available` 为 `true`，`skillCount` 为 7。
+- `POST /dsh-digital-spider/idea` 带一个 `sessionId` 时返回 `format: 2` 的 `ideaTitle / suggestion / rationale / skill`；自动点子来自会话收尾，不再由 7 分钟随机定时器抽会话。
 - 如果宠物在插件重载后消失，刷新页面；如果 SDD/主题在 profile 改动后不生效，完全退出重开应用。
 - 安装后如果出现两个同名插入行或两个依赖链接，先还原备份，只保留一个。
 
-## 5. 更新与卸载
+## 6. 更新与卸载
 
 - 集合更新：`git -C "$WORKBENCH_DIR" pull --ff-only` → `node scripts/verify.mjs` → 对改动的 bundle 执行 `remove_bundle`/`install_bundle` → 刷新页面或重开应用。
 - 新闻大屏更新：拉取后按 2.2 重新链接；改了 `src/` 要重新 build。
 - SDD 更新：`git -C "$SDD_DIR" pull --ff-only` → `pnpm install --frozen-lockfile` → 需要时 `pnpm build` → `remove_bundle`/`install_bundle` 或重开应用。**不要把 SDD 目录复制进 workbench。**
+- OpenMind 更新：`git -C "$OPENMIND_DIR" pull --ff-only` 即可；蜘蛛在下次点子生成时重新读取，无需重启。
 - 卸载 bundle：`remove_bundle`；手工挂载的新闻/SDD：还原 `package.json` / `cordis.patch.yml` 备份并删除对应 `node_modules` 链接。`.sdd/` 项目数据属于 workspace，不要随插件卸载删除。
 
-## 6. 故障排查
+## 7. 故障排查
 
 - `already-installed`：先 `remove_bundle`，再 `install_bundle`；不要并行保留多个路径。
 - 侧栏空白：主题 patch 同时禁用了 `ui-sidebar`；检查 `dsh-scifi-industrial` 是否 active，按它的 README 还原，不要只删 Client。
 - Client 插件不出现：先刷新页面；仍不出现再检查 plugin manager 的客户端 bundle 状态。
 - 桌面 profile 改动不生效：完全退出应用再开，不是刷新浏览器。
 - SDD 构建/启动失败：确认 Node >= 20、`pnpm install` 成功、`lib/index.js` 与 `lib/client.js` 存在、DSH 版本满足 `>=0.2.0-rc.1`。
+- 蜘蛛点子没有用上 OpenMind：确认 `$OPENMIND_DIR/plugins/*/skills/*/SKILL.md` 至少 7 个、`GET /state` 的 `openmind.available` 为 true；路径不对时设置 `DSH_OPENMIND_DIR` 或插件 `openmindDir`。OpenMind 不是 bundle，不要用 `install_bundle` 安装。
 - 网络导致 GitHub SSH 22 端口断开时，推送/拉取可以临时使用 `ssh.github.com:443`；安装本身优先用本地 clone，不要在目标机器上重复下载大依赖。
 
-## 7. 给 AI 安装代理的提示词
+## 8. 给 AI 安装代理的提示词
 
 把下面这段直接交给安装 AI（它应能使用 Plugin Manager / `plugin_manager` 工具）：
 
@@ -205,11 +233,12 @@ PY
 2. 安装 dsh-scifi-industrial 和 dsh-digital-spider：优先 plugin_manager 的 install_bundle，target 使用集合里的绝对路径；遇到 already-installed 先 remove_bundle 再装。
 3. 按 2.2 节处理 dsh-news-wall 的 profile patch + package link；它没有 bundle patch，不要对它 install_bundle；不要重复插入 news-wall 行。
 4. 把 dsh-e2e-dev-sdd 克隆到 <EXTERNAL_DIR>/dsh-e2e-dev-sdd，不要复制进 dsh-workbetch-aerc-style；执行 pnpm install --frozen-lockfile；lib/ 已提交，只有缺失或改过 src/ 才 pnpm build；然后用 install_bundle 安装，或按 SDD README 的桌面手工挂载，二选一，不要叠加。
-5. 每一步报告 install_bundle / remove_bundle 的结果、profile 链接和验证结果；最后确认四个包可解析、蜘蛛 state 200、SDD 分组可见。桌面 profile 改动后完全退出重开应用，Client 改动后刷新页面。
-6. 不要修改与安装无关的文件；不要把 SDD 源码、.sdd 项目数据或本机 profile 状态提交到 workbench 仓库。
+5. 把 openmind 克隆到 <EXTERNAL_DIR>/openmind，不要复制进 dsh-workbetch-aerc-style，也不要 install_bundle；它只是蜘蛛读的 Markdown 技能集合。确认 `find <OPENMIND_DIR>/plugins -name SKILL.md | wc -l` 为 7，并确认蜘蛛 state 的 openmind.available 为 true。
+6. 每一步报告 install_bundle / remove_bundle 的结果、profile 链接和验证结果；最后确认四个包可解析、蜘蛛 state 200 且 openmind 为 7 个技能、SDD 分组可见。桌面 profile 改动后完全退出重开应用，Client 改动后刷新页面。
+7. 不要修改与安装无关的文件；不要把 SDD/OpenMind 源码、.sdd 项目数据或本机 profile 状态提交到 workbench 仓库。
 ```
 
-## 8. 本集合包含什么
+## 9. 本集合包含什么
 
 ```text
 plugins/dsh-scifi-industrial/   AERC 主题 bundle
@@ -219,4 +248,4 @@ scripts/verify.mjs              集合校验
 plugins.json                    插件清单
 ```
 
-`dsh-e2e-dev-sdd` **不在**上述目录中；它只作为独立仓库按第 3 节安装。
+`dsh-e2e-dev-sdd` 与 `openmind` **不在**上述目录中；它们只作为独立仓库按第 3、4 节安装，源码不进入本集合。

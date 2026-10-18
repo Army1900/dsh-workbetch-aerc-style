@@ -5,8 +5,10 @@
  *   1. 会话推进：订阅 `api-session/status` / `api-session/activity`，
  *      再经 `sessionQuery` 补标题与最近一句助手回复；
  *   2. 定时任务：读 `schedule.catalog()`，到点前 2 分钟与触发时各推一次事件；
- *   3. 点子：每 7 分钟左右挑一个最近的根会话，把标题 + 最近用户/助手片段
- *      交给默认模型推一句可动手的点子；模型不可用时退化为本地模板。
+ *   3. 点子：会话收尾后等 2 秒，读这个会话的标题与最近用户/助手片段，
+ *      加载本地 OpenMind 技能集合，选 1-2 个技能一起交给默认模型，
+ *      输出结构化 JSON（title / suggestion / rationale / skill）；
+ *      自动点子失败时不硬凑，手动按钮保留本地模板兜底。
  *
  * 浏览器半部不碰任何 Host 私有对象：它只轮询本插件自己的两个端点
  *   GET  /dsh-digital-spider/state
@@ -16,6 +18,10 @@
  * 端点刻意放在 `/api` 之外：`/api` 是框架的前缀路由，精确路由会被它先吃掉。
  * 只服务回环地址与同源页面；不落盘、不额外注册工具、不写会话日志。
  */
+
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { basename, dirname, join } from 'node:path'
 
 export const name = 'dsh-digital-spider'
 
@@ -45,24 +51,35 @@ const SCHEDULE_GRACE_MS = 90_000
 const SESSION_REST_COOLDOWN_MS = 120_000
 /** 超过这个时间没有活动的「running」记录视为陈旧，不再计入推进中。 */
 const RUNNING_STALE_MS = 12 * 60 * 60_000
-/** 点子生成间隔。 */
-const IDEA_INTERVAL_MS = 7 * 60_000
-/** 第一次点子最早的等待时间（再加一点抖动）。 */
-const IDEA_FIRST_MS = 150_000
-const IDEA_FIRST_JITTER_MS = 90_000
+/** 两次自动点子之间的最小间隔。 */
+const IDEA_GAP_MS = 2 * 60_000
+/** 同一会话的点子冷却，避免每次收尾都冒。 */
+const SESSION_IDEA_COOLDOWN_MS = 20 * 60_000
+/** 收尾后等几秒再生成，让最后一条消息落盘。 */
+const IDEA_DEBOUNCE_MS = 2_000
+/** 太短的会话不生成点子。 */
+const IDEA_MIN_SESSION_MS = 45_000
+/** openmind 技能目录扫描缓存。 */
+const OPENMIND_CACHE_MS = 30_000
+const OPENMIND_MAX_SKILL_CHARS = 2_600
+const OPENMIND_MAX_IDEAS = 20
 /** 单次推演最多读多少上下文。 */
 const IDEA_CONTEXT_CHARS = 700
-const IDEA_MAX_TOKENS = 220
+const IDEA_MAX_TOKENS = 900
 const BODY_LIMIT = 16 * 1024
 
 /* ────────────────────────────── 插件入口 ────────────────────────────── */
 
-export function apply(ctx) {
-  const state = createState(ctx)
+export function apply(ctx, config = {}) {
+  const state = createState(ctx, config)
 
   /* 进程退出时让在途的异步工作安静下来。 */
   ctx.effect(() => () => {
     state.disposed = true
+    if (state.pendingIdeaTimer) {
+      clearTimeout(state.pendingIdeaTimer)
+      state.pendingIdeaTimer = null
+    }
   }, 'digital-spider: disposal flag')
 
   /* 会话与任务事件。全部是 fire-and-forget，监听器只更新内存。 */
@@ -147,8 +164,8 @@ export function apply(ctx) {
 
 /* ────────────────────────────── 状态 ────────────────────────────── */
 
-function createState(ctx) {
-  return {
+function createState(ctx, config) {
+  const state = {
     ctx,
     disposed: false,
     seq: 0,
@@ -168,11 +185,18 @@ function createState(ctx) {
     seenRunning: new Map(),
     lastRestAt: new Map(),
     idea: null,
+    ideas: [],
     ideaBusy: false,
-    ideaCursor: 0,
-    nextIdeaAt: Date.now() + IDEA_FIRST_MS + Math.floor(Math.random() * IDEA_FIRST_JITTER_MS),
-    lastLocalIdeas: [],
+    nextIdeaAt: 0,
+    lastIdeaBySession: new Map(),
+    pendingIdeaSession: null,
+    pendingIdeaTimer: null,
+    openmindDir: typeof config?.openmindDir === 'string' ? config.openmindDir : '',
+    openmind: null,
+    openmindAt: 0,
   }
+  refreshOpenmind(state, true)
+  return state
 }
 
 function service(ctx, name) {
@@ -253,11 +277,6 @@ function handleStatus(state, sessionId, running) {
 
   if (running && !wasRunning) {
     state.seenRunning.set(sessionId, Date.now())
-    if (!isInteresting(state, sessionId)) return
-    pushEvent(state, 'session-running', {
-      sessionId,
-      title: record.title,
-    })
     return
   }
 
@@ -269,26 +288,39 @@ function handleStatus(state, sessionId, running) {
     if (Date.now() - startedAt < 4_000) return
     if (Date.now() - (state.lastRestAt.get(sessionId) || 0) < SESSION_REST_COOLDOWN_MS) return
     state.lastRestAt.set(sessionId, Date.now())
-    void emitSessionRest(state, sessionId)
+    emitSessionRest(state, sessionId)
   }
 }
 
-async function emitSessionRest(state, sessionId) {
-  let excerpt = ''
-  try {
-    excerpt = await lastMessageText(state, sessionId, 'assistant/message', 120)
-  } catch {
-    excerpt = ''
-  }
+function emitSessionRest(state, sessionId) {
   if (state.disposed) return
   const record = state.sessions.get(sessionId)
-  if (!record || record.running) return
-  if (record.subagent) return
-  pushEvent(state, 'session-rest', {
-    sessionId,
-    title: record.title,
-    excerpt,
-  })
+  if (!record || record.running || record.subagent) return
+  scheduleRestIdea(state, sessionId)
+}
+
+/**
+ * 收尾后不要立刻推演，等最后一条消息落盘；同一会话有冷却，
+ * 太短的会话不生成，避免把每轮问答都变成点子。
+ */
+function scheduleRestIdea(state, sessionId) {
+  if (state.disposed || state.ideaBusy) return
+  const record = state.sessions.get(sessionId)
+  if (!record || record.running || record.subagent || !record.title) return
+  const now = Date.now()
+  const started = Number(record.createdAt) || 0
+  if (started > 0 && (Number(record.updatedAt) || now) - started < IDEA_MIN_SESSION_MS) return
+  if (now < state.nextIdeaAt) return
+  if (now - (state.lastIdeaBySession.get(sessionId) || 0) < SESSION_IDEA_COOLDOWN_MS) return
+
+  state.pendingIdeaSession = sessionId
+  if (state.pendingIdeaTimer) clearTimeout(state.pendingIdeaTimer)
+  state.pendingIdeaTimer = setTimeout(() => {
+    state.pendingIdeaTimer = null
+    const id = state.pendingIdeaSession
+    state.pendingIdeaSession = null
+    if (id && !state.disposed) void produceIdea(state, 'rest', id)
+  }, IDEA_DEBOUNCE_MS)
 }
 
 async function refreshSessionList(state) {
@@ -547,43 +579,57 @@ function pushEvent(state, kind, data) {
   }
 }
 
-async function produceIdea(state, trigger) {
+async function produceIdea(state, trigger, requestedSessionId) {
   if (state.ideaBusy || state.disposed) return null
   state.ideaBusy = true
-  state.nextIdeaAt = Date.now() + IDEA_INTERVAL_MS + Math.floor(Math.random() * 90_000)
+  state.nextIdeaAt = Date.now() + IDEA_GAP_MS
 
   try {
-    const candidates = await ideaCandidates(state)
-    if (candidates.length === 0) return null
-    state.ideaCursor = (state.ideaCursor + 1) % candidates.length
-    const pick = candidates[state.ideaCursor]
+    const openmind = refreshOpenmind(state, true)
+    const pick = await pickIdeaSession(state, requestedSessionId)
+    if (!pick) return null
     const context = await readIdeaContext(state, pick.id)
+    if (!context.userText && !context.assistantText) return null
 
-    let modelText = null
+    const skills = selectOpenmindSkills(openmind?.skills || [], pick.title, context)
+    let payload = null
+    let source = 'model'
     try {
-      modelText = await generateModelIdea(state, pick.title, context)
+      payload = await generateModelIdea(state, pick.title, context, skills)
     } catch (error) {
-      console.error('[digital-spider] 模型推演失败，改用本地模板：', error)
+      console.error('[digital-spider] 模型推演失败：', error)
     }
 
-    const text = modelText || localIdea(state, pick.title, context.userText)
-    if (!text) return null
-
-    const idea = {
-      id: `idea-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-      text,
-      title: pick.title || '',
-      sessionId: pick.id,
-      at: Date.now(),
-      source: modelText ? 'model' : 'local',
-      trigger: trigger || 'timer',
+    /* 自动点子宁可不冒，也不要硬凑一句通用话；手动按钮保留本地模板兜底。 */
+    if (!payload) {
+      if (trigger !== 'manual') return null
+      payload = localIdeaPayload(pick.title, context, skills)
+      source = 'local'
     }
+    if (!payload) return null
+
+    const idea = buildIdea(payload, pick, source, trigger, skills)
     state.idea = idea
+    state.ideas.push(idea)
+    if (state.ideas.length > OPENMIND_MAX_IDEAS) {
+      state.ideas.splice(0, state.ideas.length - OPENMIND_MAX_IDEAS)
+    }
+    state.lastIdeaBySession.set(pick.id, Date.now())
+
     pushEvent(state, 'idea', {
       ideaId: idea.id,
-      text: idea.text,
       title: idea.title,
+      text: idea.text,
+      ideaTitle: idea.ideaTitle,
+      suggestion: idea.suggestion,
+      rationale: idea.rationale,
+      skill: idea.skill,
+      skillReason: idea.skillReason,
       sessionId: idea.sessionId,
+      sessionTitle: idea.sessionTitle,
+      source: idea.source,
+      trigger: idea.trigger,
+      format: 2,
     })
     return idea
   } catch (error) {
@@ -594,23 +640,21 @@ async function produceIdea(state, trigger) {
   }
 }
 
-async function ideaCandidates(state) {
+async function pickIdeaSession(state, requestedSessionId) {
+  if (requestedSessionId) {
+    const record = state.sessions.get(requestedSessionId)
+    if (record && !record.subagent) return record
+  }
   if (state.sessions.size === 0 || Date.now() - state.listAt > SESSION_LIST_REFRESH_MS) {
     await refreshSessionList(state)
   }
-  if (state.sessions.size === 0) {
-    await refreshSessionList(state)
-  }
-
-  const list = []
-  for (const record of state.sessions.values()) {
-    if (!record || record.subagent) continue
-    if (!record.title && !record.updatedAt) continue
-    list.push(record)
-  }
-  list.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt))
-  const titled = list.filter((record) => record.title)
-  return (titled.length > 0 ? titled : list).slice(0, 16)
+  const list = [...state.sessions.values()].filter(
+    (record) => record && !record.subagent && (record.title || record.updatedAt),
+  )
+  list.sort(
+    (a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0),
+  )
+  return list.find((record) => record.title) || list[0] || null
 }
 
 async function readIdeaContext(state, sessionId) {
@@ -629,30 +673,53 @@ async function readIdeaContext(state, sessionId) {
   return { userText, assistantText }
 }
 
-async function generateModelIdea(state, title, context) {
+async function generateModelIdea(state, title, context, selectedSkills) {
   const llm = service(state.ctx, 'llm')
   if (!llm || typeof llm.stream !== 'function') return null
   const selection = await resolveModel(state.ctx, llm)
   if (!selection) return null
 
+  const allSkills = state.openmind?.skills?.length ? state.openmind.skills : selectedSkills
+  const catalog = allSkills
+    .map((skill) => `- ${skill.name}: ${skill.description}`)
+    .join('\n')
+  const selected = selectedSkills.length > 0 ? selectedSkills : allSkills.slice(0, 1)
+  const allowed = selected.map((skill) => skill.name)
+  const bodies = selected
+    .map((skill) => `## ${skill.name}\n${skill.body}`)
+    .join('\n\n')
+
   const lines = [
-    '你是一只趴在用户桌面上的数字蜘蛛，负责从用户自己的会话里冒出一个小点子。',
-    '请只输出一句点子：具体、能马上动手、不超过 60 个字。',
-    '语言与用户最近的消息保持一致。不要复述标题，不要泛泛鼓励，不要编号、引号或解释。',
+    '你是一只趴在用户桌面上的数字蜘蛛，负责从一个刚结束的会话里冒出一个具体、可执行的点子。',
+    '你会使用 OpenMind 思维技能，但输出必须是落在用户刚才工作上的下一步，不是技能说明。',
+    '',
+    'OpenMind 技能目录（帮助判断该用什么思维方式）：',
+    catalog || '- act-on-ground: 把已确认的结论落成下一步。',
+    '',
+    '本轮重点参考的技能（skill 字段只能从这些名字里选）：',
+    bodies || '（没有加载到 OpenMind，按 act-on-ground 的方式处理）',
+    '',
+    '只输出一个 JSON 对象，不要代码围栏、不要解释、不要 Markdown。字段格式：',
+    '{"title":"点子标题，8-40字","suggestion":"具体下一步，20-100字","rationale":"为什么现在做/依据，15-80字","skill":"' +
+      (allowed[0] || 'act-on-ground') +
+      '","skillReason":"为什么用这个技能，10-60字"}',
+    '要求：title 不要直接复述会话标题；suggestion 必须能马上动手；rationale 引用会话里的具体事实；skill 必须是 ' +
+      allowed.join('/') +
+      ' 之一。',
     '',
     `会话标题：${title || '未命名会话'}`,
   ]
   if (context.userText) lines.push(`用户最近说：${context.userText}`)
   if (context.assistantText) lines.push(`助手最近回复：${context.assistantText}`)
-  lines.push('', '你的点子：')
+  lines.push('', 'JSON：')
 
   let text = ''
   const stream = llm.stream({
     provider: selection.provider,
     model: selection.model,
-    system: '你是简洁、务实的中文创意观察器。只输出一行点子本身。',
+    system: '你是简洁、务实的中文创意观察器。只输出一个合法 JSON 对象。',
     messages: [{ role: 'user', content: [{ type: 'text', text: lines.join('\n') }] }],
-    temperature: 0.9,
+    temperature: 0.8,
     maxTokens: IDEA_MAX_TOKENS,
     signal: AbortSignal.timeout(45_000),
   })
@@ -664,7 +731,7 @@ async function generateModelIdea(state, title, context) {
       return null
     }
   }
-  return cleanIdea(text)
+  return parseIdeaPayload(text, allowed)
 }
 
 async function resolveModel(ctx, llm) {
@@ -700,95 +767,238 @@ async function resolveModel(ctx, llm) {
   return null
 }
 
-function cleanIdea(raw) {
-  if (typeof raw !== 'string') return null
-  const withoutFence = raw.replace(/```[\s\S]*?```/g, ' ')
-  const firstLine = withoutFence
-    .split('\n')
-    .map((line) => line.trim())
-    .find((line) => line.length > 0)
-  if (!firstLine) return null
-  let text = firstLine
-    .replace(/^[\s>#*\-—–\d.、)+）]+/, '')
-    .replace(/^(点子|建议|想法)[：:]\s*/, '')
-    .replace(/^["'「『]+|["'」』]+$/g, '')
-    .trim()
-  text = clip(text, 96)
-  return text.length >= 6 ? text : null
+function cleanField(value, limit) {
+  if (typeof value !== 'string') return ''
+  return clip(
+    value
+      .replace(/\s+/g, ' ')
+      .replace(/^["'「『]+|["'」』]+$/g, '')
+      .trim(),
+    limit,
+  )
 }
 
-const LOCAL_TEMPLATES = [
-  (title) => `把「${title}」的最后一步写成一条可重复运行的检查，今天先验证一次。`,
-  (title) => `「${title}」里反复手做的部分，抽成一个最小工具，下次直接复用。`,
-  (title) => `给「${title}」补一个 10 分钟的失败实验，看看最先断在哪一环。`,
-  (title) => `如果我继续「${title}」，下一个最小增量是什么？先写三行再动手。`,
-  (title) => `为「${title}」补一条回归测试，把今天踩过的坑钉住。`,
-  (title) => `把「${title}」的结论压成五行摘要，贴在文件最上面。`,
-  (title) => `把「${title}」里最不确定的假设写出来，再安排一次最省钱的验证。`,
-  (title) => `给「${title}」加一个十秒就能看懂的空状态，胜过多做三个功能。`,
+function parseIdeaPayload(raw, allowed) {
+  if (typeof raw !== 'string') return null
+  const text = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start < 0 || end <= start) return null
+  let data
+  try {
+    data = JSON.parse(text.slice(start, end + 1))
+  } catch {
+    return null
+  }
+  const title = cleanField(data.title, 64)
+  const suggestion = cleanField(data.suggestion, 220)
+  const rationale = cleanField(data.rationale, 180)
+  if (title.length < 4 || suggestion.length < 8) return null
+  const names = Array.isArray(allowed) ? allowed : []
+  const skill = names.find((name) => name === data.skill) || names[0] || ''
+  return {
+    title,
+    suggestion,
+    rationale: rationale || '基于刚才会话的收尾内容。',
+    skill,
+    skillReason: cleanField(data.skillReason, 120),
+  }
+}
+
+function formatIdeaText(payload, sessionTitle) {
+  const lines = [payload.title, payload.suggestion]
+  if (payload.rationale) lines.push('', `为什么：${payload.rationale}`)
+  if (payload.skill) lines.push(`技能：${payload.skill}`)
+  if (sessionTitle) lines.push(`来自：${sessionTitle}`)
+  return lines.join('\n')
+}
+
+function buildIdea(payload, record, source, trigger, skills) {
+  const sessionTitle = record.title || ''
+  return {
+    id: `idea-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    ideaTitle: payload.title,
+    suggestion: payload.suggestion,
+    rationale: payload.rationale,
+    skill: payload.skill || '',
+    skillReason: payload.skillReason || '',
+    text: formatIdeaText(payload, sessionTitle),
+    title: sessionTitle,
+    sessionTitle,
+    sessionId: record.id,
+    at: Date.now(),
+    source,
+    trigger,
+    format: 2,
+    skills: (skills || []).map((skill) => skill.name),
+  }
+}
+
+function localIdeaPayload(title, context, skills) {
+  const sessionTitle = title || '这个会话'
+  const skill = skills[0]?.name || 'act-on-ground'
+  return {
+    title: clip(`把「${sessionTitle}」收成一个下一步`, 64),
+    suggestion: clip(
+      `把「${sessionTitle}」里刚确认的结论挑一条，写成可执行下一步，并补上验收条件。`,
+      220,
+    ),
+    rationale: '会话刚结束，结论还在上下文里；先固化成下一步，再开新对话。',
+    skill,
+    skillReason: '用执行型技能把讨论落地，而不是继续发散。',
+  }
+}
+
+const SKILL_RULES = [
+  {
+    name: 'constraint-flip',
+    re: /(不能|没有|限制|预算|卡住|卡点|blocked|can't|cannot|constraint|limited|without)/i,
+  },
+  {
+    name: 'deep-dream',
+    re: /(想不通|灵感|换个角度|另一个角度|梦境|stuck|dream|insight|breakthrough|unexpected)/i,
+  },
+  {
+    name: 'cross-domain',
+    re: /(类比|借鉴|跨域|其他领域|别的领域|analogy|borrow|inspired|cross[- ]domain)/i,
+  },
+  {
+    name: 'poetic-essence',
+    re: /(里程碑|完成|意义|定调|诗|milestone|meaning|celebrate|poetic)/i,
+  },
+  {
+    name: 'clarify-intent',
+    re: /(目标|意图|到底要|为什么|需求|目的|goal|intent|clarify|what.*want|purpose)/i,
+  },
+  {
+    name: 'act-on-ground',
+    re: /(下一步|怎么做|落地|计划|推进|开始|next|plan|action|implement|ship)/i,
+  },
+  {
+    name: 'reflect-anchor',
+    re: /(复盘|回顾|总结|结束|完成|retro|review|reflect|lesson|wrap)/i,
+  },
 ]
 
-const KEYWORD_TEMPLATES = [
-  {
-    keys: ['测试', 'test', '回归', 'bug', '报错'],
-    build: (title) => `给「${title}」补一条最容易坏掉的回归用例，先复现再修。`,
-  },
-  {
-    keys: ['插件', 'plugin', '扩展', '工具'],
-    build: (title) => `把「${title}」里临时写死的东西抽成一个配置项，下次不用改代码。`,
-  },
-  {
-    keys: ['设计', '界面', 'ui', '排版', '样式'],
-    build: (title) => `给「${title}」先做一个能点的最低保真原型，再决定要不要精修。`,
-  },
-  {
-    keys: ['性能', '慢', '卡顿', '优化'],
-    build: (title) => `先量一下「${title}」最慢的那一步，瓶颈通常不在直觉上。`,
-  },
-  {
-    keys: ['文档', 'readme', '说明'],
-    build: (title) => `把「${title}」的结论压成五行，放到 README 最上面。`,
-  },
-]
+function selectOpenmindSkills(skills, title, context) {
+  if (!Array.isArray(skills) || skills.length === 0) return []
+  const haystack = `${title || ''}\n${context.userText || ''}\n${context.assistantText || ''}`.toLowerCase()
+  const ranked = skills.map((skill) => {
+    let score = 0
+    const rule = SKILL_RULES.find((entry) => entry.name === skill.name)
+    if (rule && rule.re.test(haystack)) score += 6
+    if (skill.name === 'act-on-ground') score += 1
+    const tokens = String(skill.description || '')
+      .toLowerCase()
+      .match(/[a-z\u4e00-\u9fff]{2,}/g) || []
+    for (const token of tokens) {
+      if (token.length >= 2 && haystack.includes(token)) score += 1
+    }
+    return { skill, score }
+  })
+  ranked.sort((a, b) => b.score - a.score)
+  const picked = []
+  for (const entry of ranked) {
+    if (picked.length >= 2) break
+    if (entry.score <= 0 && picked.length > 0) continue
+    if (!picked.some((skill) => skill.name === entry.skill.name)) picked.push(entry.skill)
+  }
+  if (picked.length === 0) picked.push(ranked[0].skill)
+  return picked
+}
 
-function localIdea(state, title, userText) {
-  const safeTitle = title || '这个会话'
-  const haystack = `${title} ${userText}`.toLowerCase()
-  let text = ''
-
-  for (const entry of KEYWORD_TEMPLATES) {
-    if (entry.keys.some((key) => haystack.includes(key.toLowerCase()))) {
-      text = entry.build(safeTitle)
-      break
+function resolveOpenmindDir(state) {
+  const candidates = [
+    state.openmindDir,
+    process.env.DSH_OPENMIND_DIR,
+    process.env.DSH_HOME ? join(process.env.DSH_HOME, 'openmind') : '',
+    join(homedir(), '.dsh', 'openmind'),
+    join(homedir(), 'WorkSpace-dsh', 'external', 'openmind'),
+    join(homedir(), 'WorkSpace', 'external', 'openmind'),
+  ]
+  for (const dir of candidates) {
+    if (!dir) continue
+    try {
+      if (existsSync(join(dir, 'plugins')) || existsSync(join(dir, '.claude-plugin'))) return dir
+    } catch {
+      /* 继续下一个候选目录。 */
     }
   }
+  return ''
+}
 
-  if (!text) {
-    const seed = hashString(`${safeTitle}|${Date.now()}`)
-    for (let offset = 0; offset < LOCAL_TEMPLATES.length; offset += 1) {
-      const candidate = LOCAL_TEMPLATES[(seed + offset) % LOCAL_TEMPLATES.length](safeTitle)
-      if (!state.lastLocalIdeas.includes(candidate)) {
-        text = candidate
-        break
+function parseSkillMarkdown(raw, file) {
+  const match = String(raw).match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/)
+  const front = match ? match[1] : ''
+  const body = (match ? match[2] : String(raw)).trim()
+  if (!body) return null
+  const nameMatch = front.match(/^name:\s*(.+)$/m)
+  const descMatch = front.match(/^description:\s*(.+)$/m)
+  const name = nameMatch ? nameMatch[1].trim() : basename(dirname(file))
+  const description = descMatch ? descMatch[1].trim() : ''
+  return {
+    name,
+    description,
+    body: body.slice(0, OPENMIND_MAX_SKILL_CHARS),
+    file,
+  }
+}
+
+function loadOpenmindSkills(root) {
+  const skills = []
+  const seen = new Set()
+  const walk = (directory, depth) => {
+    if (depth > 5) return
+    let entries = []
+    try {
+      entries = readdirSync(directory, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (entry.name === '.git' || entry.name === 'node_modules') continue
+      const full = join(directory, entry.name)
+      if (entry.isDirectory()) {
+        walk(full, depth + 1)
+        continue
+      }
+      if (entry.name !== 'SKILL.md') continue
+      try {
+        const skill = parseSkillMarkdown(readFileSync(full, 'utf8'), full)
+        if (skill && !seen.has(skill.name)) {
+          seen.add(skill.name)
+          skills.push(skill)
+        }
+      } catch {
+        /* 单个技能读失败不影响其余。 */
       }
     }
-    if (!text) text = LOCAL_TEMPLATES[seed % LOCAL_TEMPLATES.length](safeTitle)
   }
-
-  text = clip(text, 96)
-  state.lastLocalIdeas.push(text)
-  if (state.lastLocalIdeas.length > 8) state.lastLocalIdeas.shift()
-  return text
+  walk(join(root, 'plugins'), 0)
+  skills.sort((a, b) => a.name.localeCompare(b.name))
+  return skills
 }
 
-function hashString(value) {
-  let hash = 2166136261
-  const input = String(value)
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
+function refreshOpenmind(state, force = false) {
+  const now = Date.now()
+  if (!force && state.openmind && now - state.openmindAt < OPENMIND_CACHE_MS) return state.openmind
+  state.openmindAt = now
+  const root = resolveOpenmindDir(state)
+  if (!root) {
+    state.openmind = { available: false, root: '', skills: [], at: now }
+    return state.openmind
   }
-  return hash >>> 0
+  try {
+    const skills = loadOpenmindSkills(root)
+    state.openmind = { available: skills.length > 0, root, skills, at: now }
+  } catch (error) {
+    console.error('[digital-spider] 读取 OpenMind 技能失败：', error)
+    state.openmind = { available: false, root, skills: [], at: now }
+  }
+  return state.openmind
 }
 
 /* ────────────────────────────── 节拍 ────────────────────────────── */
@@ -810,10 +1020,7 @@ function tick(state) {
 
   checkSchedules(state, now)
   pruneAnnouncements(state, now)
-
-  if (!state.ideaBusy && now >= state.nextIdeaAt) {
-    void produceIdea(state, 'timer')
-  }
+  if (now - (state.openmindAt || 0) > OPENMIND_CACHE_MS) refreshOpenmind(state)
 
   /* 控制地图规模：保留最近活跃的 120 个会话。 */
   if (state.sessions.size > 120) {
@@ -855,17 +1062,27 @@ async function handleIdea(state, req, res) {
     writeJson(res, 405, { ok: false, error: 'method' })
     return
   }
+  let body = ''
   try {
-    await drain(req)
+    body = await readBody(req)
   } catch (error) {
     writeJson(res, 413, { ok: false, error: 'body' })
     return
+  }
+  let sessionId = ''
+  if (body.trim()) {
+    try {
+      const parsed = JSON.parse(body)
+      if (typeof parsed?.sessionId === 'string') sessionId = parsed.sessionId.trim()
+    } catch {
+      /* 请求体不是 JSON 时按“当前最近会话”处理。 */
+    }
   }
   if (state.ideaBusy) {
     writeJson(res, 409, { ok: false, code: 'busy' })
     return
   }
-  const idea = await produceIdea(state, 'manual')
+  const idea = await produceIdea(state, 'manual', sessionId)
   if (!idea) {
     writeJson(res, 503, { ok: false, code: 'unavailable' })
     return
@@ -902,10 +1119,16 @@ function snapshot(state) {
     })),
     events: state.events.map((event) => ({ ...event })),
     idea: state.idea ? { ...state.idea } : null,
+    ideas: state.ideas.slice(-10).map((idea) => ({ ...idea })),
+    openmind: {
+      available: state.openmind?.available === true,
+      skillCount: state.openmind?.skills?.length || 0,
+      names: (state.openmind?.skills || []).map((skill) => skill.name),
+    },
     stats: {
       running: sessions.filter((record) => record.running).length,
       schedules: state.schedules.length,
-      ideas: state.idea ? 1 : 0,
+      ideas: state.ideas.length,
     },
   }
 }
@@ -923,12 +1146,15 @@ function trusted(req) {
   return true
 }
 
-async function drain(req) {
+async function readBody(req) {
   let size = 0
+  let body = ''
   for await (const chunk of req) {
     size += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk))
     if (size > BODY_LIMIT) throw new Error('body too large')
+    body += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
   }
+  return body
 }
 
 function writeJson(res, status, body) {

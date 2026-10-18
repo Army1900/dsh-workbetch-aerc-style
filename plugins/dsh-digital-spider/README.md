@@ -2,10 +2,10 @@
 
 DeepSeek Harness Web 桌面上的未来工业八足宠物。**俯视视角**，身体只有晶体管大小（约 16×5px），八条细长腿展开约 140px，整张页面都是它的表面；它不只是一段装饰动画，会读真实的会话与定时任务状态：
 
-- **会话推进**：某个会话开始跑、某一轮收尾时，蜘蛛跑到页面左侧区域，气泡里报出会话标题；收尾时还会带一句最近回复的摘要。
-- **定时任务**：任务进入触发前 2 分钟，蜘蛛跑到页面中下部；任务真的到点时再敲一次。平时如果 45 分钟内有任务，蜘蛛脚边会挂一枚倒计时小牌。
-- **点子**：每 7 分钟左右，从最近的根会话里挑一个，把标题 + 最近用户/助手片段交给默认模型，冒一句能马上动手的建议；模型不可用时退化为本地模板，不会断档。
-- **状态面板**：点蜘蛛身体打开 `DIGITAL SPIDER // PET-07`，看推进中的会话、接下来三条任务、最近的点子；可以点「再想一个」当场再推演一次。
+- **会话关注**：每个空闲会话行左侧有一个 5px 蜘蛛锚点；会话收尾后，蜘蛛才去对应行。它不再为每次开始/结束弹通用提示，也不在全页随机巡游。
+- **定时任务**：任务进入触发前 2 分钟、真正到点时，蜘蛛在右下角 dock 提醒；45 分钟内有任务时脚边会挂倒计时小牌。
+- **点子**：会话收尾 2 秒后（每会话 20 分钟冷却、全局 2 分钟间隔），读该会话最后内容，加载本地 **OpenMind** 技能集合，挑 1–2 个技能一起推演，输出带 `title / suggestion / rationale / skill` 的结构化点子；模型失败时不硬凑自动点子，手动按钮保留本地模板。
+- **状态面板**：点蜘蛛身体打开 `DIGITAL SPIDER // PET-07`，看推进中的会话、接下来三条任务、最新点子、点子抽屉与 OpenMind 加载状态；可以点「再想一个」当场再推演一次。
 
 ## 两种动效（状态面板可切换）
 
@@ -22,7 +22,7 @@ DeepSeek Harness Web 桌面上的未来工业八足宠物。**俯视视角**，�
 - **身体律动**：步态相位驱动身体前后 surge 与横向 sway，转弯时腹部会以相反方向轻微滞后（abdomen lag），不是一块刚体平移。
 - **停走节律**：走路时每 2.4–5.6 秒会停 0.26–0.68 秒，再继续爬；提醒触发的跑动不受这个节律影响。刚接到提醒时会先有一次很短的起跑脉冲（body startle），然后冲刺。
 - **抓握反馈**：脚落下时留下一个向外扩散的橙色 grip 环，抬脚时足尖变亮、影子拉开、腿上的橙色 trace 变亮；静止时前腿更频繁地单腿探路（约 1.4–3.6s 一次），后腿更慢，保持活着的感觉。
-- **整页巡游**：随机落点覆盖整个视口，不再沿底边轨道走；气泡会出现在蜘蛛旁边，并自动避开屏幕边缘。系统开启「减少动效」后不再巡游。
+- **回到 dock**：没有提醒时蜘蛛回右下角的结点待机，不再随机全页巡游；气泡会出现在蜘蛛旁边，并自动避开屏幕边缘。系统开启「减少动效」后不再移动。
 
 ### CYBER · 电子爬虫
 
@@ -47,7 +47,7 @@ DeepSeek Harness Web 桌面上的未来工业八足宠物。**俯视视角**，�
 | 文件 | 作用 |
 | --- | --- |
 | `index.js` | Host 半部：订阅 `api-session/*`、`schedule/changed`，读 `sessionQuery` / `schedule` / `llm`，提供两个本地端点 |
-| `client.js` | Client 半部：`shell.overlay` 里的整页蜘蛛、程序化步态、气泡、倒计时牌与状态面板；zh/en 文案 |
+| `client.js` | Client 半部：`shell.overlay` 里的整页蜘蛛、`sidebar.session.row.leading` 的 5px 会话锚点、程序化步态、点子卡片/抽屉与状态面板；zh/en 文案 |
 | `cordis.patch.yml` | 插入 `digital-spider` 插件行 |
 | `locale/*.json` | 插件管理器里的名称与描述 |
 | `icon.svg` | 俯视蜘蛛图标 |
@@ -57,21 +57,21 @@ DeepSeek Harness Web 桌面上的未来工业八足宠物。**俯视视角**，�
 浏览器半部只跟本包 Host 半部说话，不碰别的插件的 DOM、不读会话日志：
 
 ```text
-GET  /dsh-digital-spider/state   # 会话、任务、最近事件、最近点子
-POST /dsh-digital-spider/idea    # 当场再推演一个点子
+GET  /dsh-digital-spider/state   # 会话、任务、点子抽屉、OpenMind 状态
+POST /dsh-digital-spider/idea    # 带 sessionId 当场再推演一个点子
 ```
 
 端点放在 `/api` 之外（`/api` 是框架自己的前缀路由）；只接受回环地址与同源页面，跨站请求会被 `sec-fetch-site` 检查挡掉。状态全部在内存里，不写盘，也不往会话日志追加任何东西。
 
-### 三个提醒区域
+### 落点
 
-| 区域 | 位置 | 触发 |
+| 目标 | 位置 | 触发 |
 | --- | --- | --- |
-| `SESSION` | 视口宽度的 17%、高度 60% 附近 | 会话开始运行 / 本轮收尾 |
-| `SCHEDULE` | 50%、68% 附近 | 任务进入 2 分钟窗口 / 到点 |
-| `IDEA` | 83%、52% 附近 | 定时灵感或手动「再想一个」 |
+| 会话 / 点子 | 该会话行左侧 5px 蜘蛛锚点 | 会话收尾生成点子 / 从抽屉打开旧点子 |
+| 定时任务 | 右下角 dock | 任务进入 2 分钟窗口 / 到点 |
+| 待机 | 右下角 dock | 没有待处理事件 |
 
-区域只是目标点，没有可见轨道；蜘蛛从当前位置直接爬过去。
+锚点由插件注册到 `sidebar.session.row.leading`，只读取自己的 5px DOM；会话行滚动出视口或折叠时退回 dock。远距离目标仍可能触发 CYBER 虫洞。
 
 ## 调整
 
@@ -79,20 +79,22 @@ Host 侧常量都在 `index.js` 顶部：
 
 - `TICK_MS`：状态补读节拍（默认 4s）
 - `SCHEDULE_LEAD_MS`：提前多久提醒（默认 120s）
-- `IDEA_INTERVAL_MS`：点子间隔（默认 7 分钟）；`IDEA_FIRST_MS` 是首次等待
+- `IDEA_GAP_MS` / `SESSION_IDEA_COOLDOWN_MS`：全局点子间隔（2 分钟）与同一会话冷却（20 分钟）
+- `IDEA_DEBOUNCE_MS` / `IDEA_MIN_SESSION_MS`：收尾后等 2s、短于 45s 的会话不生成
+- `OPENMIND_CACHE_MS`：OpenMind 技能目录扫描缓存；路径可用 `DSH_OPENMIND_DIR` 或插件 `openmindDir` 配置覆盖
 - `IDEA_MAX_TOKENS`、`IDEA_CONTEXT_CHARS`：推演的成本与上下文长度
 - `MAX_EVENTS` / `MAX_SESSIONS`：快照规模
 
 Client 侧在 `client.js` 顶部：
 
 - `POLL_MS`：轮询间隔（默认 1.6s）
-- `BUBBLE_MS` / `IDEA_MS`：气泡停留
-- `WALK_SPEED` / `RUN_SPEED` / `ACCEL`：巡游与奔跑速度（默认 50 / 280 px/s）
+- `BUBBLE_MS` / `IDEA_MS`：气泡停留；点子卡片保留 30s 后收进抽屉
+- `WALK_SPEED` / `RUN_SPEED` / `ACCEL`：爬行与奔跑速度（默认 50 / 280 px/s）
 - `BODY_SCALE`：身体绘制缩放（默认 0.26，改大就会变回大蜘蛛）
-- `ZONES`：三个提醒区域的比例
+- `rowAnchors` / `dockPoint`：会话行锚点与右下角待机点
 - `LEG_DEFS`：八条腿的髋点、静止落点、左右侧与步态组；改这里能改腿长、腿展与站姿
 - `MOTION_KEY`：动效偏好的 localStorage key；默认 `CYBER`
-- `updateCyberLegs`：CYBER 的探针间隔、探出半径、跟随速度与 grip ping
+- `updateCyberLegs`：CYBER 的足尖重踩间隔、伸展上限、探出半径与 grip ping
 - `WORMHOLE_DISTANCE` / `WARP_OUT_MS` / `WARP_TRANSFER_MS` / `WARP_IN_MS`：远距虫洞阈值与三段时长
 - `PHASE_OFFSETS`：ORGANIC 的同侧波相位
 - `CHIP_WINDOW_MS`：倒计时牌出现的窗口（默认 45 分钟）
@@ -109,9 +111,9 @@ Client 侧在 `client.js` 顶部：
 - `index.js` / `client.js` 通过 `node --check`，三个 JSON 与 `icon.svg` 解析通过；
 - `install_bundle` 返回 `application: applied`，无 warnings；Bundle 列表里 `dsh-digital-spider` 为 enabled / installed；
 - Client 侧 `shell.overlay` 的 `digital-spider-pet` occupant 为 active（order `-4`，位于机架之上、toast 之下）；
-- `GET /dsh-digital-spider/state` 返回 `v: 1`，`sessionController` 的 running 基线与当前会话一致；
-- `POST /dsh-digital-spider/idea` 成功调用默认模型，基于已有会话生成具体点子，并把 `idea` 事件写入快照；
-- 用 headless 冒烟测试渲染了 `SpiderPet`：会话收尾事件的落点超过虫洞阈值，CYBER 模式走完 `out → transfer → in` 并显示气泡；点击 `ds-hit` 打开状态面板，再分别切到 `ORGANIC` 与 `CYBER` 各跑 90 帧，两条动效路径都没有抛错。
+- `GET /dsh-digital-spider/state` 返回 `v: 1`，`sessionController` 的 running 基线与当前会话一致；`openmind.available` 为 `true`，`skillCount` 为 7；
+- `POST /dsh-digital-spider/idea` 带 `sessionId` 时成功调用默认模型，读取 OpenMind 技能，返回 `format: 2` 的 `ideaTitle / suggestion / rationale / skill`，并把 `idea` 写入快照与抽屉；
+- 用 headless 冒烟测试渲染了 `SpiderPet`：结构化点子卡片、会话行锚点退回 dock、CYBER 虫洞、状态面板与 `ORGANIC / CYBER` 切换都能跑；测试里点子卡片断言 `ds-pop__why` 存在。
 
 未验证或受环境限制：
 
@@ -124,5 +126,6 @@ Client 侧在 `client.js` 顶部：
 - 蜘蛛本体与抓握环属于 artwork，使用固定的工业色（烟黑、金属灰、安全橙、少量青）；气泡、面板、按钮底色与文字全部走 `--dsw-alias-*` token，明暗主题自动跟随。
 - 不静默修改宿主：不替换应用根、不往 `document.body` 追加东西、不 require Harness Client 包；只通过 `shell.overlay` 注册一只宠物。
 - 会话状态以 `api-session/status` / `api-session/activity` 为准，标题与摘要经 `sessionQuery` 补读；不轮询 `agent/status`，也不重扫会话日志。
-- 点子生成会把**所选会话的标题、最近一条用户消息和最近一条助手回复**（各截断）发给当前默认模型；这是本插件唯一的外发内容。不想要模型推演时，可以把「再想一个」当作本地模板，或直接停用插件。
-- 腿的落点是页面上的世界坐标，不是读取宿主 DOM；因此它能爬过任何内容，但不会真正吸附到某个按钮/卡片上。
+- 点子生成会把**所选会话的标题、最近一条用户消息和最近一条助手回复**（各截断）以及**本地选中的 OpenMind 技能说明**发给当前默认模型；这是本插件唯一的外发内容。OpenMind 源码保存在集合外的独立克隆里，不进入 workbench 仓库。
+- 会话锚点只注册在宿主提供的 `sidebar.session.row.leading` 槽位，渲染自己的 5px 节点；点击锚点由 DOM 冒泡交给会话行自己的打开逻辑，不读取别的插件 DOM。
+- 腿的落点是页面上的世界坐标；除自己的行锚点外，它不会读取宿主的按钮/卡片位置。

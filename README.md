@@ -12,7 +12,7 @@ AERC 风格的 DeepSeek Harness 工作站插件集合。三个插件仍然是**�
 | --- | --- | --- | --- |
 | `plugins/dsh-scifi-industrial` | `dsh-scifi-industrial` | 主题 bundle | AERC 重工业终端主题：启动序列、常驻机架、侧栏 chrome 接管、观测状态条。注意它会在 patch 里禁用宿主 `ui-sidebar` 并重新声明侧栏；停用/回退说明见插件自己的 README。 |
 | `plugins/dsh-news-wall` | `dsh-news-wall` | 面板插件（profile patch 安装） | Mac 风格时事大屏：多源新闻聚合、偏好解析、Host 端点 + 浏览器面板。`lib/` 是构建产物，`src/` 是源。 |
-| `plugins/dsh-digital-spider` | `dsh-digital-spider` | 宠物 overlay | 俯视八足宠物：`ORGANIC` 有机步态与 `CYBER` 足尖抓页、伸缩腿的不规律爬行两种动效，可在状态面板切换；远距目标会开信息流虫洞。 |
+| `plugins/dsh-digital-spider` | `dsh-digital-spider` | 宠物 overlay | 俯视八足宠物：`ORGANIC` 有机步态与 `CYBER` 足尖抓页、伸缩腿的不规律爬行两种动效；会话行 5px 锚点 + 右下角 dock，收尾后生成带 OpenMind 技能的结构化点子/抽屉，远距目标会开信息流虫洞。 |
 
 ## 目录
 
@@ -34,7 +34,10 @@ AERC 风格的 DeepSeek Harness 工作站插件集合。三个插件仍然是**�
 
 ## 配套仓库（不在本集合）
 
-`dsh-e2e-dev-sdd` 是独立仓库 `git@github.com:Army1900/dsh-e2e-dev-sdd.git`，**不把源码放进本集合**。安装代理按 [INSTALL.md](INSTALL.md) 第 3 节把它克隆到集合外的目录，安装依赖后单独挂载；workbench 仓库只负责记录安装步骤，不记录 SDD 源码。
+`dsh-e2e-dev-sdd` 与 `openmind` 是独立仓库，**不把源码放进本集合**：
+
+- `dsh-e2e-dev-sdd`：`git@github.com:Army1900/dsh-e2e-dev-sdd.git`。安装代理按 [INSTALL.md](INSTALL.md) 第 3 节克隆到集合外，安装依赖后单独挂载。
+- `openmind`：`git@github.com:Army1900/openmind.git`。按 [INSTALL.md](INSTALL.md) 第 4 节克隆到集合外；蜘蛛生成点子时读取它的 7 个技能，它不是 DSH bundle，不进入 workbench 源码。
 
 ## 安装
 
@@ -43,6 +46,7 @@ AERC 风格的 DeepSeek Harness 工作站插件集合。三个插件仍然是**�
 - `dsh-scifi-industrial`、`dsh-digital-spider` 用 Plugin Manager 的 `install_bundle` 安装各自目录。
 - `dsh-news-wall` 没有 `dsh.bundle.patch`，按 profile 的 `cordis.patch.yml` 插入行 + package link 安装，不能当 bundle 装。
 - `dsh-e2e-dev-sdd` 由安装 AI 单独下载到集合外，不复制进本仓库。
+- `openmind` 由安装 AI 单独下载到集合外；它是蜘蛛点子的技能集合，不是 DSH bundle。
 - 不要在仓库根目录执行 `install_bundle`；profile 绝对路径和链接属于本机状态，不提交。
 
 ## 维护

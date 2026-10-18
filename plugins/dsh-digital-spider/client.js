@@ -29,7 +29,7 @@ window.__ModuleLoader__.load({
 
     const POLL_MS = 1600
     const BUBBLE_MS = 7800
-    const IDEA_MS = 9200
+    const IDEA_MS = 30_000
     const SESSION_START_COOLDOWN_MS = 24000
     const MAX_QUEUE = 6
     const CHIP_WINDOW_MS = 45 * 60_000
@@ -66,11 +66,88 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** 屏幕上的三个提醒区域：左（会话）、中（定时）、右（灵感）。 */
-    const ZONES = {
-      session: { x: 0.17, y: 0.6 },
-      schedule: { x: 0.5, y: 0.68 },
-      idea: { x: 0.83, y: 0.52 },
+    /** 自己注册到会话行里的锚点；只读自己的 DOM，不碰别的插件。 */
+    const rowAnchors = new Map()
+    const DISMISSED_KEY = 'dsh-digital-spider.dismissed'
+
+    function sessionAnchor(sessionId) {
+      if (typeof sessionId !== 'string' || sessionId.length === 0) return null
+      const element = rowAnchors.get(sessionId)
+      if (!element || !element.isConnected) return null
+      const rect = element.getBoundingClientRect()
+      if (!rect || rect.width <= 0 || rect.height <= 0) return null
+      const width = window.innerWidth || 1200
+      const height = window.innerHeight || 800
+      if (rect.bottom < 0 || rect.top > height || rect.right < 0 || rect.left > width) return null
+      const x = rect.left + rect.width / 2
+      const y = rect.top + rect.height / 2
+      return {
+        x: clamp(x, 64, width - 64),
+        y: clamp(y, 78, Math.max(78, height - 62)),
+      }
+    }
+
+    function dockPoint() {
+      const width = window.innerWidth || 1200
+      const height = window.innerHeight || 800
+      return { x: Math.max(84, width - 76), y: Math.max(96, height - 74) }
+    }
+
+    function readDismissedIdeaIds() {
+      try {
+        const raw = window.localStorage.getItem(DISMISSED_KEY)
+        const list = raw ? JSON.parse(raw) : []
+        return Array.isArray(list) ? list.filter((id) => typeof id === 'string').slice(-80) : []
+      } catch {
+        return []
+      }
+    }
+
+    function writeDismissedIdeaIds(ids) {
+      try {
+        window.localStorage.setItem(DISMISSED_KEY, JSON.stringify(ids.slice(-80)))
+      } catch {
+        /* 隐私模式/不可写时只保留本次会话。 */
+      }
+    }
+
+    function ideaCopyText(idea) {
+      if (!idea) return ''
+      const lines = []
+      const title = idea.ideaTitle || ''
+      const suggestion = idea.suggestion || idea.text || ''
+      if (title) lines.push(title)
+      if (suggestion) lines.push(suggestion)
+      if (idea.rationale) lines.push('', `为什么：${idea.rationale}`)
+      if (idea.skill) lines.push(`技能：${idea.skill}`)
+      const sessionTitle = idea.sessionTitle || idea.title || ''
+      if (sessionTitle) lines.push(`来自：${sessionTitle}`)
+      return lines.join('\n')
+    }
+
+    function ideaToItem(idea, keyPrefix = 'idea') {
+      if (!idea || typeof idea !== 'object') return null
+      const sessionTitle = idea.sessionTitle || idea.title || ''
+      return {
+        key: `${keyPrefix}-${idea.id || Date.now()}`,
+        kind: 'idea',
+        station: 'idea',
+        at: Number(idea.at) || Date.now(),
+        title: sessionTitle,
+        sessionTitle,
+        sessionId: typeof idea.sessionId === 'string' ? idea.sessionId : '',
+        text: idea.text || '',
+        ideaId: idea.id,
+        ideaTitle: idea.ideaTitle || '',
+        suggestion: idea.suggestion || '',
+        rationale: idea.rationale || '',
+        skill: idea.skill || '',
+        skillReason: idea.skillReason || '',
+        source: idea.source || 'model',
+        trigger: idea.trigger || 'manual',
+        format: 2,
+        priority: 2,
+      }
     }
 
     const DICT = {
@@ -90,7 +167,17 @@ window.__ModuleLoader__.load({
         'scheduleNowBody': '时间到，提醒已经开始投递到对应会话。',
         'ideaTitle': '灵感信号',
         'ideaFrom': '来自「{title}」',
-        'ideaHint': '从你刚聊过的内容里长出来的。',
+        'ideaHint': '从刚收尾的会话里长出来，参考 OpenMind 技能。',
+        'why': 'WHY',
+        'skill': '技能',
+        'openSession': '打开会话',
+        'copy': '复制',
+        'copied': '已复制',
+        'ignore': '忽略',
+        'statusInbox': '点子抽屉',
+        'noInbox': '还没有收进抽屉的点子。',
+        'openmind': 'OPENMIND',
+        'openmindMissing': 'OpenMind 未加载',
         'close': '关闭',
         'dismiss': '知道了',
         'anotherIdea': '再想一个',
@@ -99,11 +186,11 @@ window.__ModuleLoader__.load({
         'statusTitle': 'DIGITAL SPIDER',
         'statusRunning': '推进中的会话',
         'statusSchedules': '即将触发',
-        'statusIdea': '最近的点子',
+        'statusIdea': '最新点子',
         'noRunning': '目前没有会话在推进。',
         'noSchedules': '没有等待中的定时任务。',
         'noIdea': '还在读你的会话，点子会自己冒出来。',
-        'statusHint': '点击蜘蛛收起 · 我会继续在页面上爬',
+        'statusHint': '点击蜘蛛收起 · 没有事件时我待在右下角的结点',
         'online': 'ONLINE',
         'offline': 'LINK LOST',
         'offlineHint': 'Host 半部暂时不可达，正在重连。',
@@ -140,7 +227,17 @@ window.__ModuleLoader__.load({
         'scheduleNowBody': 'Time is up. The reminder is being delivered to its session.',
         'ideaTitle': 'Idea signal',
         'ideaFrom': 'from "{title}"',
-        'ideaHint': 'Grown from what you were just working on.',
+        'ideaHint': 'Grown from the session that just ended, with OpenMind skills.',
+        'why': 'WHY',
+        'skill': 'Skill',
+        'openSession': 'Open session',
+        'copy': 'Copy',
+        'copied': 'Copied',
+        'ignore': 'Ignore',
+        'statusInbox': 'Idea inbox',
+        'noInbox': 'No ideas in the drawer yet.',
+        'openmind': 'OPENMIND',
+        'openmindMissing': 'OpenMind not loaded',
         'close': 'Close',
         'dismiss': 'Got it',
         'anotherIdea': 'Another idea',
@@ -153,7 +250,7 @@ window.__ModuleLoader__.load({
         'noRunning': 'No session is running right now.',
         'noSchedules': 'No scheduled task is waiting.',
         'noIdea': 'Still reading your sessions. An idea will surface.',
-        'statusHint': 'Click the spider to close · I keep crawling the page',
+        'statusHint': 'Click the spider to close · I rest at the bottom-right node when idle',
         'online': 'ONLINE',
         'offline': 'LINK LOST',
         'offlineHint': 'The Host half is unreachable. Reconnecting.',
@@ -681,8 +778,37 @@ window.__ModuleLoader__.load({
   margin-left: auto;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 6px;
 }
+.ds-pop__why {
+  display: flex;
+  gap: 7px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px dashed color-mix(in srgb, var(--ds-line) 72%, transparent);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--ds-text) 82%, transparent);
+}
+.ds-pop__why-label {
+  flex: none;
+  font-family: var(--ds-mono);
+  font-size: 8px;
+  letter-spacing: .12em;
+  color: var(--ds-accent);
+}
+.ds-pop__from,
+.ds-pop__skill {
+  margin-top: 6px;
+  font-family: var(--ds-mono);
+  font-size: 8.5px;
+  line-height: 1.4;
+  letter-spacing: .04em;
+  color: color-mix(in srgb, var(--ds-muted) 88%, transparent);
+}
+.ds-pop__skill { color: color-mix(in srgb, var(--ds-accent) 78%, var(--ds-muted)); }
 .ds-btn {
   padding: 5px 9px;
   border: 1px solid color-mix(in srgb, var(--ds-accent) 58%, transparent);
@@ -753,7 +879,7 @@ window.__ModuleLoader__.load({
 
 /* ── 状态面板 ───────────────────────────────────────────────── */
 .ds-panel {
-  max-height: min(360px, calc(100vh - 130px));
+  max-height: min(460px, calc(100vh - 130px));
   overflow: auto;
   scrollbar-width: thin;
 }
@@ -815,6 +941,21 @@ window.__ModuleLoader__.load({
   background: color-mix(in srgb, var(--ds-accent) 5%, transparent);
 }
 .ds-panel__idea p { margin: 0; font-size: 11.5px; line-height: 1.5; }
+.ds-panel__idea-title {
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ds-text);
+}
+.ds-panel__idea-why {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed color-mix(in srgb, var(--ds-line) 72%, transparent);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--ds-text) 78%, transparent);
+}
 .ds-panel__idea-foot {
   display: flex;
   align-items: center;
@@ -826,6 +967,44 @@ window.__ModuleLoader__.load({
   color: color-mix(in srgb, var(--ds-muted) 84%, transparent);
 }
 .ds-panel__idea-foot .ds-btn { margin-left: auto; }
+.ds-inbox__item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 0;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--ds-line) 58%, transparent);
+  background: transparent;
+  color: var(--ds-text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.ds-inbox__item:first-of-type { border-top: 0; }
+.ds-inbox__item:hover .ds-inbox__title { color: var(--ds-accent); }
+.ds-inbox__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.35;
+  transition: color .15s ease;
+}
+.ds-inbox__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ds-mono);
+  font-size: 8px;
+  letter-spacing: .04em;
+  color: color-mix(in srgb, var(--ds-muted) 86%, transparent);
+}
+.ds-panel__openmind {
+  font-family: var(--ds-mono);
+  font-size: 8px;
+  letter-spacing: .1em;
+  color: color-mix(in srgb, var(--ds-accent) 72%, var(--ds-muted));
+}
 .ds-panel__foot {
   display: flex;
   align-items: center;
@@ -899,6 +1078,20 @@ window.__ModuleLoader__.load({
   100% { transform: scale(1.3); opacity: 0; }
 }
 @keyframes ds-warp-flow { to { stroke-dashoffset: -20; } }
+
+/* 会话行里的蜘蛛锚点；只占 5px，不挡会话行点击 */
+.ds-row-anchor {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 1px;
+  border-radius: 50%;
+  background: var(--ds-accent);
+  box-shadow: 0 0 4px rgba(255, 90, 31, .55);
+  opacity: .68;
+  pointer-events: none;
+  vertical-align: middle;
+}
 
 /* 电子爬虫：同一套钢灰 + 安全橙，只是腿稍微更硬、更电气化 */
 .ds-root[data-motion="cyber"] .ds-leg__under { stroke-width: 1.35; }
@@ -1016,15 +1209,28 @@ window.__ModuleLoader__.load({
             body: translate('scheduleNowBody'),
             tone: 'alert',
           }
-        case 'idea':
+        case 'idea': {
+          const sessionTitle = item.sessionTitle || item.title || ''
+          const skill = item.skill || ''
           return {
             label: translate('label.idea'),
-            title: item.title ? format(translate('ideaFrom'), { title: item.title }) : translate('ideaTitle'),
-            meta: item.source === 'model' ? translate('source.model') : translate('source.local'),
-            body: item.text || '',
+            title: sessionTitle
+              ? format(translate('ideaFrom'), { title: sessionTitle })
+              : translate('ideaTitle'),
+            meta: skill || (item.source === 'model' ? translate('source.model') : translate('source.local')),
+            body: item.suggestion || item.text || '',
             hint: translate('ideaHint'),
             tone: 'idea',
+            ideaTitle: item.ideaTitle || '',
+            suggestion: item.suggestion || item.text || '',
+            rationale: item.rationale || '',
+            skill,
+            skillReason: item.skillReason || '',
+            sessionTitle,
+            sessionId: item.sessionId || '',
+            ideaSource: item.source || 'model',
           }
+        }
         default:
           return null
       }
@@ -1204,23 +1410,11 @@ window.__ModuleLoader__.load({
       sim.abdomenLag = 0
     }
 
-    function randomPoint(width, height) {
-      const left = 86
-      const top = 108
-      const right = Math.max(left + 40, width - 86)
-      const bottom = Math.max(top + 40, height - 76)
-      return {
-        x: left + Math.random() * (right - left),
-        y: top + Math.random() * (bottom - top),
-      }
-    }
-
-    function targetForItem(item, width, height) {
-      const zone = ZONES[item.station] || ZONES.idea
-      return {
-        x: clamp(width * zone.x + (Math.random() - 0.5) * width * 0.06, 86, width - 86),
-        y: clamp(height * zone.y + (Math.random() - 0.5) * height * 0.08, 108, height - 76),
-      }
+    function targetForItem(item) {
+      /* 有会话行锚点就去真实行上；行不在视口/没有锚点时回 dock。 */
+      const anchor = sessionAnchor(item?.sessionId)
+      if (anchor) return anchor
+      return dockPoint()
     }
 
     function placePop(x, y, isPanel) {
@@ -1300,6 +1494,22 @@ window.__ModuleLoader__.load({
       ]
     }
 
+    function SessionRowAnchor(props) {
+      const ref = React.useRef(null)
+      const sessionId = props && typeof props.sessionId === 'string' ? props.sessionId : ''
+
+      React.useEffect(() => {
+        const element = ref.current
+        if (!element || !sessionId) return undefined
+        rowAnchors.set(sessionId, element)
+        return () => {
+          if (rowAnchors.get(sessionId) === element) rowAnchors.delete(sessionId)
+        }
+      }, [sessionId])
+
+      return h('span', { ref, className: 'ds-row-anchor', 'aria-hidden': 'true' })
+    }
+
     function SpiderPet(props) {
       const { t: translate, locale } = props
       useLocaleRevision(locale)
@@ -1313,6 +1523,8 @@ window.__ModuleLoader__.load({
       const [generating, setGenerating] = React.useState(false)
       const [ideaError, setIdeaError] = React.useState(false)
       const [latestIdea, setLatestIdea] = React.useState(null)
+      const [dismissedIds, setDismissedIds] = React.useState(() => new Set(readDismissedIdeaIds()))
+      const [copyDone, setCopyDone] = React.useState(false)
       const [, setClock] = React.useState(0)
 
       const simRef = React.useRef(null)
@@ -1335,6 +1547,7 @@ window.__ModuleLoader__.load({
       const panelOpenRef = React.useRef(false)
       const reducedRef = React.useRef(false)
       const seenRef = React.useRef(new Set())
+      const seenIdeaRef = React.useRef(new Set())
       const baselineRef = React.useRef(false)
       const startedAtRef = React.useRef(0)
       const lastSessionStartRef = React.useRef(0)
@@ -1397,10 +1610,19 @@ window.__ModuleLoader__.load({
             ideaId: item.ideaId,
             at: item.at,
             source: item.source,
+            sessionId: content.sessionId,
+            ideaTitle: content.ideaTitle,
+            suggestion: content.suggestion,
+            rationale: content.rationale,
+            skill: content.skill,
+            skillReason: content.skillReason,
+            sessionTitle: content.sessionTitle,
+            ideaSource: content.ideaSource,
           }
           bubbleRef.current = next
           setBubble(next)
           setIdeaError(false)
+          setCopyDone(false)
           if (sim) {
             sim.mode = 'perch'
             sim.pending = null
@@ -1427,8 +1649,10 @@ window.__ModuleLoader__.load({
         setBubble(null)
         const sim = simRef.current
         if (sim && !panelOpenRef.current) {
-          sim.mode = 'idle'
-          sim.nextWanderAt = performance.now() + 1200 + Math.random() * 2000
+          const dock = dockPoint()
+          sim.target = dock
+          sim.mode = 'walk'
+          sim.nextWanderAt = Number.POSITIVE_INFINITY
         }
         window.setTimeout(() => {
           if (apiRef.current) apiRef.current.pump()
@@ -1445,10 +1669,10 @@ window.__ModuleLoader__.load({
           return
         }
         if (sim) {
-          sim.mode = 'idle'
-          if (!Number.isFinite(sim.nextWanderAt)) {
-            sim.nextWanderAt = performance.now() + 1200 + Math.random() * 2200
-          }
+          const dock = dockPoint()
+          sim.target = dock
+          sim.mode = 'walk'
+          sim.nextWanderAt = Number.POSITIVE_INFINITY
         }
       }, [])
 
@@ -1619,20 +1843,32 @@ window.__ModuleLoader__.load({
         if (kind === 'idea') {
           const ideaId = event.ideaId
           if (ideaId) {
+            if (seenIdeaRef.current.has(ideaId)) return
             if (bubbleRef.current && bubbleRef.current.ideaId === ideaId) return
             if (queueRef.current.some((entry) => entry.ideaId === ideaId)) return
             if (sim && sim.pending && sim.pending.ideaId === ideaId) return
+            seenIdeaRef.current.add(ideaId)
           }
+          const sessionTitle = event.sessionTitle || event.title || ''
           if (apiRef.current) {
             apiRef.current.enqueue({
               key: event.id,
               kind,
               station: 'idea',
               at: event.at,
-              title: event.title || '',
+              title: sessionTitle,
+              sessionTitle,
+              sessionId: event.sessionId || '',
               text: event.text || '',
               ideaId,
-              source: event.source || 'local',
+              ideaTitle: event.ideaTitle || '',
+              suggestion: event.suggestion || '',
+              rationale: event.rationale || '',
+              skill: event.skill || '',
+              skillReason: event.skillReason || '',
+              source: event.source || 'model',
+              trigger: event.trigger || 'rest',
+              format: 2,
               priority: 2,
             })
           }
@@ -1647,6 +1883,15 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         const now0 = performance.now()
         const sim = createSim(window.innerWidth || 1200, window.innerHeight || 800, now0)
+        const dock = dockPoint()
+        sim.x = dock.x
+        sim.y = dock.y
+        sim.rx = dock.x
+        sim.ry = dock.y
+        sim.target = { x: dock.x, y: dock.y }
+        sim.mode = 'idle'
+        sim.nextWanderAt = Number.POSITIVE_INFINITY
+        resetLegsForMotion(sim, motionRef.current, now0)
         simRef.current = sim
         let raf = 0
         let last = now0
@@ -2041,13 +2286,14 @@ window.__ModuleLoader__.load({
               !reduced &&
               !sim.pending &&
               !bubbleRef.current &&
-              !panelOpenRef.current &&
-              now > sim.nextWanderAt
+              !panelOpenRef.current
             ) {
-              sim.target = randomPoint(width, height)
-              sim.mode = 'walk'
-              sim.nextWanderAt = Number.POSITIVE_INFINITY
-              sim.nextBurstAt = now + 1600 + Math.random() * 2200
+              const dock = dockPoint()
+              if (Math.hypot(sim.x - dock.x, sim.y - dock.y) > 8) {
+                sim.target = dock
+                sim.mode = 'walk'
+                sim.nextWanderAt = Number.POSITIVE_INFINITY
+              }
             }
 
             if (!reduced) {
@@ -2419,8 +2665,9 @@ window.__ModuleLoader__.load({
           panelOpenRef.current = false
           setPanelOpen(false)
           if (sim) {
-            sim.mode = 'idle'
-            sim.nextWanderAt = performance.now() + 1200
+            sim.target = dockPoint()
+            sim.mode = 'walk'
+            sim.nextWanderAt = Number.POSITIVE_INFINITY
           }
           window.setTimeout(() => {
             if (apiRef.current) apiRef.current.pump()
@@ -2463,7 +2710,7 @@ window.__ModuleLoader__.load({
         return () => window.removeEventListener('keydown', onKey)
       }, [panelOpen])
 
-      const requestIdea = async () => {
+      const requestIdea = async (sessionId) => {
         if (generating) return
         setGenerating(true)
         setIdeaError(false)
@@ -2472,32 +2719,31 @@ window.__ModuleLoader__.load({
             typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
               ? AbortSignal.timeout(60_000)
               : undefined
+          const payload = typeof sessionId === 'string' && sessionId ? { sessionId } : {}
           const response = await fetch(`${window.location.origin}${IDEA_URL}`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: '{}',
+            body: JSON.stringify(payload),
             signal: timeout,
           })
           const data = await response.json().catch(() => null)
           if (data && data.ok && data.idea) {
-            setLatestIdea(data.idea)
-            const item = {
-              key: `manual-${data.idea.id}`,
-              kind: 'idea',
-              station: 'idea',
-              at: Number(data.idea.at) || Date.now(),
-              title: data.idea.title || '',
-              text: data.idea.text || '',
-              ideaId: data.idea.id,
-              source: data.idea.source || 'local',
-              priority: 3,
+            const idea = data.idea
+            setLatestIdea(idea)
+            const alreadySeen = seenIdeaRef.current.has(idea.id)
+            seenIdeaRef.current.add(idea.id)
+            if (!alreadySeen) {
+              const item = ideaToItem(idea, 'manual')
+              if (item) {
+                item.priority = 3
+                if (bubbleRef.current && bubbleRef.current.kind === 'idea') {
+                  clearTimeout(hideTimerRef.current)
+                  bubbleRef.current = null
+                  setBubble(null)
+                }
+                if (apiRef.current) apiRef.current.enqueue(item)
+              }
             }
-            if (bubbleRef.current && bubbleRef.current.kind === 'idea') {
-              clearTimeout(hideTimerRef.current)
-              bubbleRef.current = null
-              setBubble(null)
-            }
-            if (apiRef.current) apiRef.current.enqueue(item)
           } else {
             setIdeaError(true)
           }
@@ -2506,6 +2752,58 @@ window.__ModuleLoader__.load({
         } finally {
           setGenerating(false)
         }
+      }
+
+      const openSession = (sessionId) => {
+        if (!sessionId) return
+        const element = rowAnchors.get(sessionId)
+        if (element && typeof element.click === 'function') {
+          /* 锚点在自己的会话行里；点击会正常冒泡到会话行自己的打开逻辑。 */
+          element.click()
+        }
+      }
+
+      const copyIdea = async (idea) => {
+        if (!idea) return
+        const text = ideaCopyText(idea)
+        if (!text) return
+        try {
+          if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+            throw new Error('clipboard unavailable')
+          }
+          await navigator.clipboard.writeText(text)
+          setCopyDone(true)
+          window.setTimeout(() => setCopyDone(false), 1600)
+        } catch {
+          setIdeaError(true)
+        }
+      }
+
+      const dismissIdea = (ideaId) => {
+        if (!ideaId) return
+        setDismissedIds((previous) => {
+          if (previous.has(ideaId)) return previous
+          const next = new Set(previous)
+          next.add(ideaId)
+          writeDismissedIdeaIds([...next])
+          return next
+        })
+        if (latestIdea && latestIdea.id === ideaId) setLatestIdea(null)
+        if (bubbleRef.current && bubbleRef.current.ideaId === ideaId) closeBubble()
+      }
+
+      const focusIdea = (idea) => {
+        const item = ideaToItem(idea, 'inbox')
+        if (!item) return
+        setLatestIdea(idea)
+        panelOpenRef.current = false
+        setPanelOpen(false)
+        if (bubbleRef.current) {
+          clearTimeout(hideTimerRef.current)
+          bubbleRef.current = null
+          setBubble(null)
+        }
+        if (apiRef.current) apiRef.current.dispatchItem(item)
       }
 
       const holdBubble = () => clearTimeout(hideTimerRef.current)
@@ -2534,7 +2832,15 @@ window.__ModuleLoader__.load({
         }
       }
       const showChip = Boolean(nextTask) && nextDelta <= CHIP_WINDOW_MS && !bubble && !panelOpen
-      const panelIdea = latestIdea || (snapshot && snapshot.idea) || null
+      const panelIdeaRaw = latestIdea || (snapshot && snapshot.idea) || null
+      const panelIdea =
+        panelIdeaRaw && !dismissedIds.has(panelIdeaRaw.id) ? panelIdeaRaw : null
+      const inboxIdeas = ((snapshot && snapshot.ideas) || [])
+        .filter((idea) => idea && !dismissedIds.has(idea.id))
+        .slice()
+        .reverse()
+        .slice(0, 6)
+      const openmind = (snapshot && snapshot.openmind) || null
       const stats = format(translate('stats'), {
         sessions: sessions.length,
         tasks: schedules.length,
@@ -2839,9 +3145,46 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { className: 'ds-pop__body-wrap' },
-                  h('p', { className: 'ds-pop__title' }, bubble.title),
-                  h('p', { className: 'ds-pop__body' }, bubble.body),
-                  bubble.hint ? h('div', { className: 'ds-pop__hint' }, bubble.hint) : null,
+                  bubble.kind === 'idea'
+                    ? h(
+                        React.Fragment,
+                        null,
+                        h('p', { className: 'ds-pop__title' }, bubble.ideaTitle || bubble.title),
+                        h('p', { className: 'ds-pop__body' }, bubble.suggestion || bubble.body),
+                        bubble.rationale
+                          ? h(
+                              'div',
+                              { className: 'ds-pop__why' },
+                              h('span', { className: 'ds-pop__why-label' }, translate('why')),
+                              h('span', null, bubble.rationale),
+                            )
+                          : null,
+                        bubble.sessionTitle
+                          ? h(
+                              'div',
+                              { className: 'ds-pop__from' },
+                              `${format(translate('ideaFrom'), { title: bubble.sessionTitle })} · ${
+                                bubble.ideaSource === 'model'
+                                  ? translate('source.model')
+                                  : translate('source.local')
+                              }`,
+                            )
+                          : null,
+                        bubble.skill
+                          ? h(
+                              'div',
+                              { className: 'ds-pop__skill' },
+                              `${translate('skill')} · ${bubble.skill}`,
+                            )
+                          : null,
+                      )
+                    : h(
+                        React.Fragment,
+                        null,
+                        h('p', { className: 'ds-pop__title' }, bubble.title),
+                        h('p', { className: 'ds-pop__body' }, bubble.body),
+                        bubble.hint ? h('div', { className: 'ds-pop__hint' }, bubble.hint) : null,
+                      ),
                   ideaError && bubble.kind === 'idea'
                     ? h('div', { className: 'ds-pop__error' }, translate('genericError'))
                     : null,
@@ -2855,25 +3198,56 @@ window.__ModuleLoader__.load({
                     { className: 'ds-pop__actions' },
                     bubble.kind === 'idea'
                       ? h(
+                          React.Fragment,
+                          null,
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'ds-btn',
+                              disabled: !sessionAnchor(bubble.sessionId),
+                              onClick: () => openSession(bubble.sessionId),
+                            },
+                            translate('openSession'),
+                          ),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'ds-btn',
+                              onClick: () => copyIdea(bubble),
+                            },
+                            copyDone ? translate('copied') : translate('copy'),
+                          ),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'ds-btn',
+                              disabled: generating,
+                              onClick: () => requestIdea(bubble.sessionId),
+                            },
+                            generating ? translate('thinking') : translate('anotherIdea'),
+                          ),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'ds-btn ds-btn--ghost',
+                              onClick: () => dismissIdea(bubble.ideaId),
+                            },
+                            translate('ignore'),
+                          ),
+                        )
+                      : h(
                           'button',
                           {
                             type: 'button',
-                            className: 'ds-btn',
-                            disabled: generating,
-                            onClick: requestIdea,
+                            className: 'ds-btn ds-btn--ghost',
+                            onClick: () => apiRef.current && apiRef.current.closeBubble(),
                           },
-                          generating ? translate('thinking') : translate('anotherIdea'),
-                        )
-                      : null,
-                    h(
-                      'button',
-                      {
-                        type: 'button',
-                        className: 'ds-btn ds-btn--ghost',
-                        onClick: () => apiRef.current && apiRef.current.closeBubble(),
-                      },
-                      translate('dismiss'),
-                    ),
+                          translate('dismiss'),
+                        ),
                   ),
                 ),
               )
@@ -3001,11 +3375,24 @@ window.__ModuleLoader__.load({
                       ? h(
                           'div',
                           { className: 'ds-panel__idea' },
-                          h('p', null, panelIdea.text),
+                          panelIdea.ideaTitle
+                            ? h('div', { className: 'ds-panel__idea-title' }, panelIdea.ideaTitle)
+                            : null,
+                          h('p', null, panelIdea.suggestion || panelIdea.text),
+                          panelIdea.rationale
+                            ? h('div', { className: 'ds-panel__idea-why' }, panelIdea.rationale)
+                            : null,
                           h(
                             'div',
                             { className: 'ds-panel__idea-foot' },
-                            h('span', null, panelIdea.title || translate('ideaTitle')),
+                            h(
+                              'span',
+                              null,
+                              panelIdea.skill ||
+                                panelIdea.sessionTitle ||
+                                panelIdea.title ||
+                                translate('ideaTitle'),
+                            ),
                             h(
                               'span',
                               null,
@@ -3019,14 +3406,66 @@ window.__ModuleLoader__.load({
                                 type: 'button',
                                 className: 'ds-btn',
                                 disabled: generating,
-                                onClick: requestIdea,
+                                onClick: () => requestIdea(panelIdea.sessionId),
                               },
                               generating ? translate('thinking') : translate('anotherIdea'),
                             ),
                           ),
                         )
-                      : h('div', { className: 'ds-panel__empty' }, translate('noIdea')),
+                      : h(
+                          'div',
+                          { className: 'ds-panel__empty' },
+                          translate('noIdea'),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'ds-btn',
+                              disabled: generating,
+                              onClick: () => requestIdea(null),
+                              style: { marginLeft: '8px' },
+                            },
+                            generating ? translate('thinking') : translate('anotherIdea'),
+                          ),
+                        ),
                     ideaError ? h('div', { className: 'ds-pop__error' }, translate('ideaError')) : null,
+                  ),
+                  h(
+                    'div',
+                    { className: 'ds-panel__sec' },
+                    h('div', { className: 'ds-panel__label' }, translate('statusInbox')),
+                    inboxIdeas.length === 0
+                      ? h('div', { className: 'ds-panel__empty' }, translate('noInbox'))
+                      : inboxIdeas.map((idea) =>
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'ds-inbox__item',
+                              key: idea.id,
+                              onClick: () => focusIdea(idea),
+                            },
+                            h(
+                              'span',
+                              { className: 'ds-inbox__title' },
+                              idea.ideaTitle || idea.text || translate('ideaTitle'),
+                            ),
+                            h(
+                              'span',
+                              { className: 'ds-inbox__meta' },
+                              `${idea.skill || translate('source.local')} · ${
+                                idea.sessionTitle || ''
+                              }`,
+                            ),
+                          ),
+                        ),
+                  ),
+                  h(
+                    'div',
+                    { className: 'ds-panel__openmind' },
+                    openmind && openmind.available
+                      ? `${translate('openmind')} · ${openmind.skillCount}`
+                      : translate('openmindMissing'),
                   ),
                 ),
                 h(
@@ -3081,6 +3520,17 @@ window.__ModuleLoader__.load({
             ctx.slots.register({ name: 'shell.overlay', id: 'digital-spider-pet', order: -4 }, Seat),
           ),
         'digital-spider: overlay seat',
+      )
+
+      ctx.effect(
+        () =>
+          ctx.slots.inject('sidebar.session.row.leading', () =>
+            ctx.slots.register(
+              { name: 'sidebar.session.row.leading', id: 'digital-spider-anchor', order: 20 },
+              SessionRowAnchor,
+            ),
+          ),
+        'digital-spider: session row anchor',
       )
     }
 
