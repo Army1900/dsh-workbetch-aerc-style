@@ -2,6 +2,8 @@
 
 > 仓库源名：`dsh-workbetch-aerc-style`
 
+**安装请看 [INSTALL.md](INSTALL.md)**：包含集合三个插件、独立 SDD 插件、验证和给 AI 安装代理的步骤。
+
 AERC 风格的 DeepSeek Harness 工作站插件集合。三个插件仍然是**各自独立安装**的：主题与宠物是 bundle 包，新闻大屏目前通过 profile 的 `cordis.patch.yml` 插入行 + package 链接安装。本仓库是它们的统一源码与维护入口；不要把仓库根目录当成一个 bundle 安装。
 
 ## 插件
@@ -18,46 +20,30 @@ AERC 风格的 DeepSeek Harness 工作站插件集合。三个插件仍然是**�
 .
 ├── plugins/
 │   ├── dsh-scifi-industrial/   # 主题 bundle
-│   ├── dsh-news-wall/          # 新闻面板 bundle
+│   ├── dsh-news-wall/          # 新闻面板（profile patch）
 │   └── dsh-digital-spider/     # 桌面宠物 bundle
 ├── scripts/
 │   └── verify.mjs              # 集合级校验
 ├── plugins.json                # 插件清单（维护用，不是 DSH bundle）
 ├── package.json                # 集合仓库脚本，无运行时依赖
+├── INSTALL.md                  # 统一安装指南
 └── README.md
 ```
 
 每个插件内部仍然有自己的 `package.json` 和 README；bundle 插件另有 `cordis.patch.yml`、`locale/*.json` 和 `icon.svg`。
 
-## 安装与更新
+## 配套仓库（不在本集合）
 
-### 主题与宠物（bundle）
+`dsh-e2e-dev-sdd` 是独立仓库 `git@github.com:Army1900/dsh-e2e-dev-sdd.git`，**不把源码放进本集合**。安装代理按 [INSTALL.md](INSTALL.md) 第 3 节把它克隆到集合外的目录，安装依赖后单独挂载；workbench 仓库只负责记录安装步骤，不记录 SDD 源码。
 
-在 DeepSeek Harness 的 Plugin Manager 里用 `install_bundle` 安装**单个插件目录**，target 指向：
+## 安装
 
-```text
-<repo>/plugins/dsh-scifi-industrial
-<repo>/plugins/dsh-digital-spider
-```
+统一安装指南见 [INSTALL.md](INSTALL.md)。要点：
 
-### 新闻大屏（profile patch 安装）
-
-`dsh-news-wall` 没有 `dsh.bundle.patch`，它由 profile 的 `cordis.patch.yml` 插入 Loader 行，并在 profile 依赖里链接这个包：
-
-```yaml
-- insert:
-    - id: news-wall
-      name: dsh-news-wall
-```
-
-新机器上安装时，把 profile 的 `dsh-news-wall` 依赖指向本仓库的 `plugins/dsh-news-wall`，并保留上面的插入行。这些是 profile 状态，不写进仓库。
-
-安装后 profile 里记录的是本机绝对路径；这部分属于 profile 状态，不要提交到仓库，也不要在仓库里手写 `~/.dsh` 的依赖。
-
-- **不要**在仓库根目录执行 `install_bundle`：根目录没有 `dsh.bundle`，只是集合仓库。
-- 三个插件都没有运行时 npm 依赖；不需要在仓库里跑 `pnpm install`。
-- `dsh-scifi-industrial` 会接管侧栏。它的 patch 同时禁用了宿主 `ui-sidebar`；如果只删掉部分文件，侧栏可能变空。回退步骤见该插件 README。
-- 更新 Host 侧代码后，Plugin Manager 通常会走 HMR；如果只更新了 Client 侧，刷新页面即可。替换已安装包时以 Plugin Manager 的 `application` 结果为准。
+- `dsh-scifi-industrial`、`dsh-digital-spider` 用 Plugin Manager 的 `install_bundle` 安装各自目录。
+- `dsh-news-wall` 没有 `dsh.bundle.patch`，按 profile 的 `cordis.patch.yml` 插入行 + package link 安装，不能当 bundle 装。
+- `dsh-e2e-dev-sdd` 由安装 AI 单独下载到集合外，不复制进本仓库。
+- 不要在仓库根目录执行 `install_bundle`；profile 绝对路径和链接属于本机状态，不提交。
 
 ## 维护
 
