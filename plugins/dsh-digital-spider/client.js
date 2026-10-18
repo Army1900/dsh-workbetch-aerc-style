@@ -41,9 +41,23 @@ window.__ModuleLoader__.load({
     const BODY_SCALE = 0.26
     /** CYBER 模式下，目标超过这个距离就原地开虫洞，而不是爬过去。 */
     const WORMHOLE_DISTANCE = 260
-    const WARP_OUT_MS = 500
-    const WARP_TRANSFER_MS = 200
-    const WARP_IN_MS = 540
+    /** 数据包传输三段：编码拆包 / 沿路由传输（按距离伸缩）/ 解码重组。 */
+    const WARP_OUT_MS = 520
+    const WARP_TRANSFER_MS = 340
+    const WARP_IN_MS = 600
+    const PACKET_COUNT = 14
+    /** CYBER 爬行：八向路由 + 交替四足步态。 */
+    const CYBER_WALK_SPEED = 150
+    const CYBER_RUN_SPEED = 440
+    const CYBER_SWING = 0.4
+    /** 伸缩腿的最大伸展（静止腿长的倍数）；超过就强制抓下一个点。 */
+    const CYBER_REACH = 2.1
+    /** 抓取式前探：四对腿额外前伸的步长比例（前→后）。 */
+    const CYBER_GRAB = [0.24, 0.1, 0, -0.05]
+    const ROUTE_GRID = 24
+    const ROUTE_NODES = 6
+    const PING_SLOTS = 8
+    const TRAIL_POINTS = 48
 
     const MOTION_KEY = 'dsh-digital-spider.motion'
     const MOTION_ORGANIC = 'organic'
@@ -209,7 +223,7 @@ window.__ModuleLoader__.load({
         'motion.organic': '有机蜘蛛',
         'motion.cyber': '电子爬虫',
         'motion.organicHint': '按距离落脚，像真实蜘蛛：慢速爬行、会停顿。',
-        'motion.cyberHint': '足尖抓住页面，身体在足尖之间爬行；腿可伸长缩短，迈步节奏不规律。',
+        'motion.cyberHint': '伸缩腿像抓钩一样前探抓点、把身体拽过去，沿八向路由快速爬行；远距离拆成数据包传输。',
       },
       en: {
         'label.session': 'SESSION LINK',
@@ -269,7 +283,7 @@ window.__ModuleLoader__.load({
         'motion.organic': 'ORGANIC',
         'motion.cyber': 'CYBER',
         'motion.organicHint': 'Distance-based foot planting, like a real spider: slow creep with pauses.',
-        'motion.cyberHint': 'Planted feet with a crawling body, telescoping legs, and an irregular step rhythm.',
+        'motion.cyberHint': 'Telescoping legs grapple ahead and haul the body along fast octilinear routes; long hops travel as packets.',
       },
     }
 
@@ -1027,57 +1041,88 @@ window.__ModuleLoader__.load({
 .ds-panel__state .ds-led { width: 4px; height: 4px; background: var(--ds-ok); box-shadow: 0 0 6px var(--ds-ok); }
 .ds-panel__state.is-offline .ds-led { background: var(--ds-bad); box-shadow: 0 0 6px var(--ds-bad); }
 
-/* 远程虫洞：信息流环 + 两点之间的虚线数据带 */
-.ds-warp__link {
+/* CYBER 网络层：路由预览、跳点、拖链与数据包传输 */
+.ds-net, .ds-trail, .ds-pings, .ds-packets, .ds-ep { pointer-events: none; }
+.ds-root[data-motion="organic"] .ds-net,
+.ds-root[data-motion="organic"] .ds-trail,
+.ds-root[data-motion="organic"] .ds-pings { display: none; }
+.ds-net__route {
   fill: none;
   stroke: var(--ds-accent);
-  stroke-width: 1.4;
-  stroke-dasharray: 3 7;
-  animation: ds-warp-flow .7s linear infinite;
+  stroke-width: .7;
+  stroke-linejoin: miter;
+  stroke-dasharray: 1.6 3.4;
+  animation: ds-net-flow .9s linear infinite;
 }
-.ds-portal { pointer-events: none; }
-.ds-portal__core { fill: url(#ds-portal-core); }
-.ds-portal__ring {
+.ds-net__lit {
   fill: none;
-  transform-box: fill-box;
-  transform-origin: 50% 50%;
+  stroke: #ffd3b0;
+  stroke-width: 1.5;
+  stroke-linejoin: miter;
+  filter: drop-shadow(0 0 2px rgba(255, 122, 61, .8));
 }
-.ds-portal__ring--outer {
-  stroke: var(--ds-accent);
-  stroke-width: 2;
-  stroke-dasharray: 5 7;
-  animation: ds-portal-spin 3.2s linear infinite;
-}
-.ds-portal__ring--mid {
+.ds-net__node {
+  fill: #0c1014;
   stroke: var(--ds-amber);
-  stroke-width: 1.1;
-  stroke-dasharray: 2 4;
-  animation: ds-portal-spin 1.9s linear infinite reverse;
+  stroke-width: .7;
 }
-.ds-portal__ticks {
+.ds-trail__seg {
+  fill: none;
+  stroke: var(--ds-accent);
+  stroke-width: .55;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: .4 2.2;
+}
+.ds-ping__shape {
+  fill: none;
+  stroke: var(--ds-amber);
+  stroke-width: .6;
+  vector-effect: non-scaling-stroke;
+}
+.ds-packet { stroke: none; }
+.ds-packet--a { fill: var(--ds-accent); }
+.ds-packet--b { fill: var(--ds-amber); }
+.ds-packet--c { fill: #ffe4c6; }
+.ds-ep__frame {
   fill: none;
   stroke: var(--ds-amber);
   stroke-width: 1;
-  opacity: .55;
-  transform-box: fill-box;
-  transform-origin: 50% 50%;
-  animation: ds-portal-spin 9s linear infinite;
+  vector-effect: non-scaling-stroke;
 }
-.ds-portal__pulse {
+.ds-ep__ticks {
   fill: none;
   stroke: var(--ds-accent);
-  stroke-width: 1.2;
-  opacity: .4;
+  stroke-width: .7;
+  opacity: .7;
+}
+.ds-ep__node {
+  fill: #0c1014;
+  stroke: var(--ds-accent);
+  stroke-width: .8;
+}
+.ds-ep__ping {
+  fill: none;
+  stroke: var(--ds-accent);
+  stroke-width: .8;
   transform-box: fill-box;
   transform-origin: 50% 50%;
-  animation: ds-portal-pulse 1.5s ease-out infinite;
+  animation: ds-ep-ping .9s ease-out infinite;
 }
-@keyframes ds-portal-spin { to { transform: rotate(360deg); } }
-@keyframes ds-portal-pulse {
-  0% { transform: scale(.82); opacity: .5; }
-  100% { transform: scale(1.3); opacity: 0; }
+.ds-ep__label {
+  font-family: var(--ds-mono);
+  font-size: 8px;
+  letter-spacing: .04em;
+  fill: #ffd3b0;
+  paint-order: stroke;
+  stroke: rgba(7, 10, 13, .7);
+  stroke-width: 1.6px;
 }
-@keyframes ds-warp-flow { to { stroke-dashoffset: -20; } }
+@keyframes ds-ep-ping {
+  0% { transform: rotate(45deg) scale(.6); opacity: .8; }
+  100% { transform: rotate(45deg) scale(2.4); opacity: 0; }
+}
+@keyframes ds-net-flow { to { stroke-dashoffset: -10; } }
 
 /* 会话行里的蜘蛛锚点；只占 5px，不挡会话行点击 */
 .ds-row-anchor {
@@ -1121,7 +1166,7 @@ window.__ModuleLoader__.load({
 @keyframes ds-cyber-spin { to { transform: rotate(360deg); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .ds-body-breathe, .ds-core, .ds-chip, .ds-pop { animation: none !important; }
+  .ds-body-breathe, .ds-core, .ds-chip, .ds-pop, .ds-net__route, .ds-ep__ping { animation: none !important; }
 }
 
 @media (max-width: 560px) {
@@ -1337,11 +1382,11 @@ window.__ModuleLoader__.load({
           now +
           (leg.front ? 1400 + Math.random() * 2200 : 3200 + Math.random() * 4200),
         cyber: {
-          limit: 78 + Math.random() * 50,
-          nextStepAt: now + 300 + Math.random() * 1000,
-          probeAt: now + 2200 + Math.random() * 4200,
+          cycle: -1,
           probe: false,
-          phase: Math.random() * Math.PI * 2,
+          probeAt: now + 2600 + Math.random() * 4200,
+          holdUntil: 0,
+          pulseAt: -1e9,
         },
       }
     }
@@ -1370,15 +1415,27 @@ window.__ModuleLoader__.load({
         pauseUntil: 0,
         nextBurstAt: now + 2000,
         startle: 0,
-        cyberSpeedFactor: 1,
         omega: 0,
+        cyberCycle: 0,
+        cyberMove: 0,
+        cyberSettleAt: 0,
+        route: [],
+        routeIndex: 0,
+        routeFor: null,
+        routeAlpha: 0,
+        routeDraw: [],
+        nodeHoldUntil: 0,
+        trail: [],
+        trailAt: 0,
+        pings: Array.from({ length: PING_SLOTS }, () => ({ x: 0, y: 0, at: -1e9, size: 1 })),
+        pingCursor: 0,
         abdomenLag: 0,
         warp: null,
         warpState: null,
         warpScale: 1,
-        warpLegPull: 0,
-        warpSpin: 0,
+        warpLegPull: [0, 0],
         warpVisible: 1,
+        warpGlitch: 0,
         legs: LEG_DEFS.map((leg) => createLeg(leg, x, y, angle, now)),
         grips: Array.from({ length: GRIP_SLOTS }, () => ({ x: 0, y: 0, at: -1e9 })),
         gripCursor: 0,
@@ -1395,11 +1452,10 @@ window.__ModuleLoader__.load({
           leg.stepping = false
           leg.lift = 0
           leg.nextAt = 0
-          leg.cyber.limit = 78 + Math.random() * 50
-          leg.cyber.nextStepAt = now + 300 + Math.random() * 1000
+          leg.cyber.cycle = -1
           leg.cyber.probe = false
-          leg.cyber.probeAt = now + 2200 + Math.random() * 4200
-          leg.cyber.phase = Math.random() * Math.PI * 2
+          leg.cyber.probeAt = now + 2600 + Math.random() * 4200
+          leg.cyber.holdUntil = 0
           continue
         }
         const home = legPoint(sim, leg, [leg.def.home[0], leg.def.home[1]])
@@ -1411,8 +1467,129 @@ window.__ModuleLoader__.load({
         leg.nextAt = 0
       }
       sim.gaitPhase = 0
+      sim.cyberCycle = 0
+      sim.cyberMove = 0
       sim.omega = 0
       sim.abdomenLag = 0
+      sim.route = []
+      sim.routeIndex = 0
+      sim.routeFor = null
+      sim.trail = []
+    }
+
+    /** 中断传输：恢复身体并把未送达的提醒交回队列。 */
+    function abortWarp(sim) {
+      const item = sim.warp ? sim.warp.item : null
+      sim.warp = null
+      sim.warpState = null
+      sim.warpScale = 1
+      sim.warpLegPull = [0, 0]
+      sim.warpVisible = 1
+      sim.warpGlitch = 0
+      return item
+    }
+
+    /**
+     * 八向路由：像 PCB 走线一样只走 0°/45°/90°，最多一个拐点。
+     * 返回不含起点的路点数组，最后一个就是目标。
+     */
+    function planRoute(from, to) {
+      const dx = to.x - from.x
+      const dy = to.y - from.y
+      const adx = Math.abs(dx)
+      const ady = Math.abs(dy)
+      const diag = Math.min(adx, ady)
+      const straight = Math.max(adx, ady) - diag
+      if (Math.hypot(dx, dy) < 40 || diag < 10 || straight < 10) return [{ x: to.x, y: to.y }]
+      const sx = Math.sign(dx)
+      const sy = Math.sign(dy)
+      const corner =
+        Math.random() < 0.5
+          ? { x: from.x + sx * diag, y: from.y + sy * diag }
+          : adx > ady
+            ? { x: from.x + sx * straight, y: from.y }
+            : { x: from.x, y: from.y + sy * straight }
+      return [corner, { x: to.x, y: to.y }]
+    }
+
+    function polylineLength(points) {
+      let total = 0
+      for (let index = 1; index < points.length; index += 1) {
+        total += Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y)
+      }
+      return total
+    }
+
+    function pointAlong(points, distance) {
+      let left = Math.max(0, distance)
+      for (let index = 1; index < points.length; index += 1) {
+        const a = points[index - 1]
+        const b = points[index]
+        const segment = Math.hypot(b.x - a.x, b.y - a.y)
+        if (left <= segment || index === points.length - 1) {
+          const t = segment > 0 ? clamp(left / segment, 0, 1) : 1
+          return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t) }
+        }
+        left -= segment
+      }
+      return { x: points[0].x, y: points[0].y }
+    }
+
+    function pathData(points) {
+      return points
+        .map((point, index) => `${index ? 'L' : 'M'}${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+        .join('')
+    }
+
+    /** 蜘蛛身体被拆成的数据块：沿身体长轴分布在 3px 栅格上。 */
+    function packetCloud(angle) {
+      const cos = Math.cos(angle)
+      const sin = Math.sin(angle)
+      return Array.from({ length: PACKET_COUNT }, () => {
+        const lx = Math.round((-18 + Math.random() * 28) / 4) * 4
+        const ly = Math.round((-7 + Math.random() * 14) / 4) * 4
+        return { x: lx * cos - ly * sin, y: lx * sin + ly * cos }
+      })
+    }
+
+    /** 把蜘蛛编码成一次数据包传输，送到 target；item 到达后弹出。 */
+    function beginWarp(sim, target, item, now) {
+      sim.pending = null
+      sim.mode = 'warp'
+      sim.vx = 0
+      sim.vy = 0
+      sim.rx = sim.x
+      sim.ry = sim.y
+      sim.route = []
+      sim.routeFor = null
+      const from = { x: sim.x, y: sim.y }
+      const to = { x: target.x, y: target.y }
+      const path = [from, ...planRoute(from, to)]
+      const length = polylineLength(path)
+      sim.warp = {
+        stage: 'out',
+        t0: now,
+        from,
+        to,
+        item: item || null,
+        path,
+        length,
+        transmitMs: clamp(WARP_TRANSFER_MS + length * 0.32, WARP_TRANSFER_MS, 760),
+        src: packetCloud(sim.angle),
+        dst: packetCloud(sim.angle),
+        tag: hexTag(),
+        landed: [false, false],
+      }
+      sim.startle = 1
+      sim.nextWanderAt = Number.POSITIVE_INFINITY
+    }
+
+    function hexTag() {
+      return `0x${Math.floor(Math.random() * 0xffff).toString(16).toUpperCase().padStart(4, '0')}`
+    }
+
+    function minimumJerk(t) {
+      return t * t * t * (10 - 15 * t + 6 * t * t)
     }
 
     function randomPoint(width, height) {
@@ -1421,8 +1598,8 @@ window.__ModuleLoader__.load({
       const right = Math.max(left + 40, width - 86)
       const bottom = Math.max(top + 40, height - 76)
       return {
-        x: left + Math.random() * (right - left),
-        y: top + Math.random() * (bottom - top),
+        x: clamp(Math.round((left + Math.random() * (right - left)) / ROUTE_GRID) * ROUTE_GRID, left, right),
+        y: clamp(Math.round((top + Math.random() * (bottom - top)) / ROUTE_GRID) * ROUTE_GRID, top, bottom),
       }
     }
 
@@ -1459,7 +1636,7 @@ window.__ModuleLoader__.load({
       const d = Math.max(0.001, Math.hypot(dx, dy))
       const femur = leg.def.femur
       const tibia = leg.def.tibia
-      const a = (femur * femur - tibia * tibia + d * d) / (2 * d)
+      const a = clamp((femur * femur - tibia * tibia + d * d) / (2 * d), -femur, femur)
       const h = Math.sqrt(Math.max(0, femur * femur - a * a))
       const mx = hip.x + (dx / d) * a
       const my = hip.y + (dy / d) * a
@@ -1497,16 +1674,33 @@ window.__ModuleLoader__.load({
       return score(a1) >= score(a2) ? a1 : a2
     }
 
-    const PORTAL_TICKS =
-      'M0 -76L0 -60M54 -54L42 -42M76 0L60 0M54 54L42 42M0 76L0 60M-54 54L-42 42M-76 0L-60 0M-54 -54L-42 -42'
+    const EP_BRACKETS =
+      'M-1 -.55V-1H-.55M.55 -1H1V-.55M1 .55V1H.55M-.55 1H-1V.55'
+    const EP_TICKS = 'M0 -32V-25M32 0H25M0 32V25M-32 0H-25'
 
-    function portalArt() {
+    /** 传输端点：锁定框 + 准星刻度 + 菱形节点 + 方形脉冲 + TX/RX 标签。 */
+    function endpointArt(slot) {
       return [
-        h('circle', { key: 'core', className: 'ds-portal__core', r: '30' }),
-        h('circle', { key: 'outer', className: 'ds-portal__ring ds-portal__ring--outer', r: '58' }),
-        h('circle', { key: 'mid', className: 'ds-portal__ring ds-portal__ring--mid', r: '42' }),
-        h('path', { key: 'ticks', className: 'ds-portal__ticks', d: PORTAL_TICKS }),
-        h('circle', { key: 'pulse', className: 'ds-portal__pulse', r: '70' }),
+        h('path', { key: 'ticks', className: 'ds-ep__ticks', d: EP_TICKS }),
+        h('rect', { key: 'ping', className: 'ds-ep__ping', x: '-4', y: '-4', width: '8', height: '8' }),
+        h('path', { key: 'node', className: 'ds-ep__node', d: 'M0 -3.2L3.2 0L0 3.2L-3.2 0Z' }),
+        h('path', {
+          key: 'frame',
+          ref: (element) => {
+            slot.frame = element
+          },
+          className: 'ds-ep__frame',
+          d: EP_BRACKETS,
+        }),
+        h('text', {
+          key: 'label',
+          ref: (element) => {
+            slot.label = element
+          },
+          className: 'ds-ep__label',
+          x: '20',
+          y: '-18',
+        }),
       ]
     }
 
@@ -1552,9 +1746,13 @@ window.__ModuleLoader__.load({
       const bodyGlowRef = React.useRef(null)
       const abdomenRef = React.useRef(null)
       const legsLayerRef = React.useRef(null)
-      const portalARef = React.useRef(null)
-      const portalBRef = React.useRef(null)
-      const warpLinkRef = React.useRef(null)
+      const routeRef = React.useRef(null)
+      const routeLitRef = React.useRef(null)
+      const routeNodeEls = React.useRef(Array.from({ length: ROUTE_NODES }, () => null))
+      const trailEls = React.useRef([null, null, null])
+      const pingEls = React.useRef(Array.from({ length: PING_SLOTS }, () => null))
+      const packetEls = React.useRef(Array.from({ length: PACKET_COUNT }, () => null))
+      const endpointEls = React.useRef([{}, {}])
       const legEls = React.useRef(LEG_DEFS.map(() => ({})))
       const gripEls = React.useRef(Array.from({ length: GRIP_SLOTS }, () => ({})))
       const queueRef = React.useRef([])
@@ -1725,21 +1923,7 @@ window.__ModuleLoader__.load({
           if (sim.pending && sim.pending !== item) {
             queueRef.current.push({ ...sim.pending, priority: sim.pending.priority || 2 })
           }
-          sim.pending = null
-          sim.mode = 'warp'
-          sim.vx = 0
-          sim.vy = 0
-          sim.rx = sim.x
-          sim.ry = sim.y
-          sim.warp = {
-            stage: 'out',
-            t0: performance.now(),
-            from: { x: sim.x, y: sim.y },
-            to: target,
-            item,
-          }
-          sim.startle = 1
-          sim.nextWanderAt = Number.POSITIVE_INFINITY
+          beginWarp(sim, target, item, performance.now())
           return
         }
         if (sim.pending && sim.pending !== item) {
@@ -1964,159 +2148,225 @@ window.__ModuleLoader__.load({
           leg.arc = (leg.def.side * 0.6 + (Math.random() - 0.5) * 0.8) * bow
         }
 
-        const updateCyberLegs = (now) => {
-          const speed = Math.hypot(sim.vx, sim.vy)
-          const moving = speed > 5
-          const maxSwing = speed > 160 ? 4 : 3
-          let swinging = 0
-          for (const leg of sim.legs) if (leg.stepping) swinging += 1
+        const plantPing = (at, size) => {
+          const slot = sim.pings[sim.pingCursor % PING_SLOTS]
+          sim.pingCursor += 1
+          if (slot) {
+            slot.x = at.x
+            slot.y = at.y
+            slot.size = size
+            slot.at = performance.now()
+          }
+        }
 
+        /** 身体在 ahead 秒后的预测位姿下，这条腿的静止落点。 */
+        const predictedHome = (leg, ahead) => {
+          const horizon = clamp(ahead, 0, 0.8)
+          const angle = sim.angle + sim.omega * horizon
+          const bx = sim.x + sim.vx * horizon
+          const by = sim.y + sim.vy * horizon
+          const cos = Math.cos(angle)
+          const sin = Math.sin(angle)
+          const [hx, hy] = leg.def.home
+          return { x: bx + hx * cos - hy * sin, y: by + hx * sin + hy * cos }
+        }
+
+        const startCyberStep = (leg, now, target, dur, bow) => {
+          const margin = 20
+          leg.from = { x: leg.foot.x, y: leg.foot.y }
+          leg.to = {
+            x: clamp(target.x, margin, (window.innerWidth || 1200) - margin),
+            y: clamp(target.y, margin, (window.innerHeight || 800) - margin),
+          }
+          leg.t0 = now
+          leg.dur = dur
+          leg.stepping = true
+          leg.lift = 0
+          leg.arc = bow
+        }
+
+        /**
+         * 交替四足：L1·R2·L3·R4 与 R1·L2·R3·L4 两组相差半个周期，组内从后往前
+         * 有一条小的相位波。相位由身体位移 + 转身角速度推进，所以腿只在身体真的
+         * 移动/转动时迈步；落点取「摆动结束 + 半个支撑期」时髋部所在的位置，
+         * 身体会正好从脚上方经过。
+         */
+        const updateCyberLegs = (now, effSpeed, cycleDist) => {
+          let swinging = 0
           for (const leg of sim.legs) {
-            if (leg.stepping) {
-              const p = (now - leg.t0) / leg.dur
-              if (p >= 1) {
-                leg.stepping = false
-                leg.foot = { x: leg.to.x, y: leg.to.y }
-                leg.lift = 0
-                plantGrip(leg.foot)
-                leg.cyber.limit = 78 + Math.random() * 50
-                leg.cyber.nextStepAt =
-                  now + (speed > 160 ? 260 + Math.random() * 500 : 450 + Math.random() * 900)
-                leg.cyber.probe = false
-                swinging = Math.max(0, swinging - 1)
-              } else {
-                leg.lift = Math.sin(Math.PI * p)
-              }
+            if (!leg.stepping) continue
+            const p = (now - leg.t0) / leg.dur
+            if (p < 1) {
+              leg.lift = Math.sin(Math.PI * p)
+              swinging += 1
               continue
             }
-
-            const hip = legPoint(sim, leg, [leg.def.hip[0], leg.def.hip[1]])
-            const distance = Math.hypot(leg.foot.x - hip.x, leg.foot.y - hip.y)
-            const phase = (sim.gaitPhase + (leg.def.phaseOffset || 0)) % 1
-            const inWindow = !moving || phase < 0.48 || distance > leg.cyber.limit * 1.35
-            const wants =
-              inWindow &&
-              (moving
-                ? distance > leg.cyber.limit || now > leg.cyber.nextStepAt
-                : now > leg.cyber.nextStepAt)
-            if (!wants) continue
-            if (!moving && swinging > 0) continue
-            if (swinging >= maxSwing) continue
-
-            const homeAngle = sim.angle + Math.atan2(leg.def.home[1], leg.def.home[0])
-            const motionAngle = speed > 8 ? Math.atan2(sim.vy, sim.vx) : sim.angle
-            const probeBusy = sim.legs.some((other) => other.cyber.probe)
-            const probing =
-              !probeBusy && !leg.cyber.probe && now >= leg.cyber.probeAt && Math.random() < 0.55
-            let angle
-            let radius
-            if (probing) {
-              angle = homeAngle + (Math.random() - 0.5) * 0.18
-              radius = 128 + Math.random() * 62
-            } else if (moving) {
-              const lead = leg.def.front ? 0.7 : 0.42
-              angle = homeAngle * (1 - lead) + motionAngle * lead + (Math.random() - 0.5) * 0.5
-              radius =
-                (leg.def.front ? 78 : 68) + Math.random() * 60 + (speed > 160 ? 35 : 0)
-            } else {
-              angle = homeAngle + (Math.random() - 0.5) * 0.55
-              radius = 58 + Math.random() * 64
-            }
-            let tx = sim.rx + Math.cos(angle) * radius
-            let ty = sim.ry + Math.sin(angle) * radius
-            const margin = 26
-            tx = clamp(tx, margin, (window.innerWidth || 1200) - margin)
-            ty = clamp(ty, margin, (window.innerHeight || 800) - margin)
-            const dx = tx - hip.x
-            const dy = ty - hip.y
-            const len = Math.hypot(dx, dy)
-            if (len < 48) {
-              const k = 48 / Math.max(0.001, len)
-              tx = hip.x + dx * k
-              ty = hip.y + dy * k
-            }
-            leg.from = { x: leg.foot.x, y: leg.foot.y }
-            leg.to = { x: tx, y: ty }
-            leg.t0 = now
-            leg.dur = probing
-              ? 300 + Math.random() * 160
-              : moving
-                ? speed > 160
-                  ? 90 + Math.random() * 70
-                  : 140 + Math.random() * 130
-                : 240 + Math.random() * 120
-            leg.stepping = true
+            leg.stepping = false
+            leg.foot = { x: leg.to.x, y: leg.to.y }
             leg.lift = 0
-            leg.arc =
-              (Math.random() < 0.5 ? -1 : 1) *
-              (probing ? 9 + Math.random() * 7 : 6 + Math.random() * 9)
-            if (probing) {
-              leg.cyber.probe = true
-              leg.cyber.probeAt = now + 5000 + Math.random() * 6000
+            leg.cyber.pulseAt = now
+            plantGrip(leg.foot)
+            if (leg.cyber.probe) {
+              leg.cyber.probe = false
+              leg.cyber.holdUntil = now + 650 + Math.random() * 450
+              plantPing(leg.foot, 0.8)
             }
-            leg.cyber.nextStepAt =
-              now +
-              (probing
-                ? 900 + Math.random() * 700
-                : speed > 160
-                  ? 240 + Math.random() * 500
-                  : 500 + Math.random() * 1000)
-            swinging += 1
+          }
+
+          const moving = effSpeed > 6
+          if (moving) {
+            sim.cyberSettleAt = now + 180
+            const stanceTime = ((1 - CYBER_SWING) * cycleDist) / Math.max(effSpeed, 1)
+            for (const leg of sim.legs) {
+              if (leg.stepping) continue
+              leg.cyber.holdUntil = 0
+              const offset = leg.def.group * 0.5 + (leg.def.index % 4) * 0.035
+              const local = sim.cyberCycle + offset
+              const cycle = Math.floor(local)
+              const frac = local - cycle
+              const hip = legPoint(sim, leg, leg.def.hip)
+              const overReach =
+                Math.hypot(leg.foot.x - hip.x, leg.foot.y - hip.y) > leg.def.rest * CYBER_REACH
+              if (!overReach && (frac >= CYBER_SWING || leg.cyber.cycle === cycle)) continue
+              /* 始终留至少四只脚撑地；晚到的腿等下一拍。 */
+              if (!overReach && swinging >= 4) continue
+              leg.cyber.cycle = cycle
+              const remaining = Math.max(0.12, CYBER_SWING - frac)
+              const dur = clamp(((remaining * cycleDist) / Math.max(effSpeed, 1)) * 1000, 60, 300)
+              const target = predictedHome(leg, dur / 1000 + stanceTime / 2)
+              /* 前腿像抓钩一样伸得更远，后腿留在身后被拖着收回。 */
+              const speed = Math.hypot(sim.vx, sim.vy)
+              if (speed > 4) {
+                const grab = CYBER_GRAB[leg.def.index % 4] * cycleDist
+                target.x += (sim.vx / speed) * grab
+                target.y += (sim.vy / speed) * grab
+              }
+              startCyberStep(leg, now, target, dur, 0.26)
+              swinging += 1
+            }
+            return
+          }
+
+          if (swinging > 0 || now < sim.cyberSettleAt) return
+
+          /* 停下后按组收脚：偏得更多的那组先迈，另一组下一拍跟上。 */
+          const deviation = [0, 0]
+          for (const leg of sim.legs) {
+            if (leg.cyber.holdUntil > now) continue
+            const home = legPoint(sim, leg, leg.def.home)
+            const d = Math.hypot(home.x - leg.foot.x, home.y - leg.foot.y)
+            deviation[leg.def.group] = Math.max(deviation[leg.def.group], d)
+          }
+          const group = deviation[0] >= deviation[1] ? 0 : 1
+          if (deviation[group] > 4.5) {
+            for (const leg of sim.legs) {
+              if (leg.def.group !== group || leg.cyber.holdUntil > now) continue
+              const home = legPoint(sim, leg, leg.def.home)
+              if (Math.hypot(home.x - leg.foot.x, home.y - leg.foot.y) <= 3) continue
+              startCyberStep(leg, now, home, 130, 0.14)
+            }
+            sim.cyberSettleAt = now + 150
+            return
+          }
+
+          /* 站稳后：前腿偶尔向前探出、点一下页面，再收回。 */
+          if (reducedRef.current || sim.mode === 'warp') return
+          for (const leg of sim.legs) {
+            if (!leg.def.front || now < leg.cyber.probeAt) continue
+            if (sim.legs.some((other) => other.cyber.holdUntil > now)) break
+            const cos = Math.cos(sim.angle)
+            const sin = Math.sin(sim.angle)
+            const lx = leg.def.home[0] + 30 + Math.random() * 26
+            const ly = leg.def.home[1] + leg.def.side * (2 + Math.random() * 6)
+            leg.cyber.probe = true
+            leg.cyber.probeAt = now + 3800 + Math.random() * 4600
+            startCyberStep(
+              leg,
+              now,
+              { x: sim.rx + lx * cos - ly * sin, y: sim.ry + lx * sin + ly * cos },
+              220,
+              0.12,
+            )
+            sim.cyberSettleAt = now + 300
+            break
           }
         }
 
         const renderCyberLegs = (now) => {
+          const fmt = (value) => value.toFixed(2)
           for (const leg of sim.legs) {
             const els = legEls.current[leg.def.index]
             if (!els || !els.femur) continue
-            const hip = legPoint(sim, leg, [leg.def.hip[0], leg.def.hip[1]])
-            let foot = leg.foot
+            const hip = legPoint(sim, leg, leg.def.hip)
+            let footX = leg.foot.x
+            let footY = leg.foot.y
             let lift = 0
             if (leg.stepping) {
               const p = clamp((now - leg.t0) / leg.dur, 0, 1)
-              const e = ease(p)
-              const baseX = lerp(leg.from.x, leg.to.x, e)
-              const baseY = lerp(leg.from.y, leg.to.y, e)
-              const dx = leg.to.x - leg.from.x
-              const dy = leg.to.y - leg.from.y
-              const len = Math.max(0.001, Math.hypot(dx, dy))
-              const px = -dy / len
-              const py = dx / len
-              const arc = Math.sin(Math.PI * p) * leg.arc
-              foot = { x: baseX + px * arc, y: baseY + py * arc }
+              const e = minimumJerk(p)
+              footX = lerp(leg.from.x, leg.to.x, e)
+              footY = lerp(leg.from.y, leg.to.y, e)
+              /*
+               * 伸缩腿：前半程收回（足尖向身体缩），后半程弹射伸出、略微越过落点
+               * 再回弹抓住；leg.arc 是收缩比例。影子拉开表示抬起。
+               */
+              const wave = Math.sin(Math.PI * 2 * p)
+              const radial = 1 - leg.arc * wave * (p < 0.5 ? 1 : 0.45)
+              footX = sim.rx + (footX - sim.rx) * radial
+              footY = sim.ry + (footY - sim.ry) * radial
               lift = Math.sin(Math.PI * p)
             }
 
-            let footX = foot.x
-            let footY = foot.y
-            const pull = sim.warpLegPull || 0
+            const pull = sim.warpLegPull[leg.def.group] || 0
             if (pull > 0) {
-              const rx = footX - sim.rx
-              const ry = footY - sim.ry
-              const radius = Math.hypot(rx, ry) * (1 - Math.min(0.96, pull * 0.96))
-              const spin = Math.atan2(ry, rx) + (sim.warpSpin || 0)
-              footX = sim.rx + Math.cos(spin) * radius
-              footY = sim.ry + Math.sin(spin) * radius
+              const k = 1 - Math.min(0.97, pull)
+              footX = sim.rx + (footX - sim.rx) * k
+              footY = sim.ry + (footY - sim.ry) * k
             }
 
-            const dx = footX - hip.x
-            const dy = footY - hip.y
-            const len = Math.max(0.001, Math.hypot(dx, dy))
-            const nx = -dy / len
-            const ny = dx / len
-            const amp = 1 + Math.min(3.5, len * 0.02)
-            const wave = now * 0.0008 + leg.cyber.phase
-            const w1 = Math.sin(wave) * amp
-            const w2 = Math.sin(wave + 0.9) * amp * 0.8
-            const w3 = Math.sin(wave + 1.8) * amp * 0.6
-            const p1 = { x: hip.x + dx * 0.26 + nx * w1, y: hip.y + dy * 0.26 + ny * w1 }
-            const p2 = { x: hip.x + dx * 0.52 + nx * w2, y: hip.y + dy * 0.52 + ny * w2 }
-            const p3 = { x: hip.x + dx * 0.78 + nx * w3, y: hip.y + dy * 0.78 + ny * w3 }
-            const fmt = (value) => value.toFixed(2)
+            const foot = { x: footX, y: footY }
+            /*
+             * 俯视投影的膝：真实蜘蛛的膝是朝上抬起的，从上往下看只在髋—足连线外侧
+             * 鼓出一点点。两段腿长按折叠比例缩短，再取侧向高度的一小部分作为外拱。
+             */
+            const shrink = 1 - Math.min(0.97, pull)
+            const hx = foot.x - hip.x
+            const hy = foot.y - hip.y
+            const reachD = Math.max(0.001, Math.hypot(hx, hy))
+            /* 伸缩：各节按比例伸长/缩短，伸得越长越直、越细。 */
+            const extension = reachD / leg.def.rest
+            const lateral =
+              clamp(reachD * 0.075, 0.8, 6.5) * shrink * clamp(1.6 - extension * 0.5, 0.35, 1.2) +
+              lift * 1.2
+            let perpX = -hy / reachD
+            let perpY = hx / reachD
+            if ((-perpX * Math.sin(sim.angle) + perpY * Math.cos(sim.angle)) * leg.def.side < 0) {
+              perpX = -perpX
+              perpY = -perpY
+            }
+            const kneeAt = reachD * 0.44
+            const knee = {
+              x: hip.x + (hx / reachD) * kneeAt + perpX * lateral,
+              y: hip.y + (hy / reachD) * kneeAt + perpY * lateral,
+            }
+            const kx = foot.x - knee.x
+            const ky = foot.y - knee.y
+            const klen = Math.max(0.001, Math.hypot(kx, ky))
+            const bend = leg.def.side * (1.4 + lift * 0.8)
+            const nx = (-ky / klen) * bend
+            const ny = (kx / klen) * bend
+            const localSide = (x, y) =>
+              (-(x - knee.x) * Math.sin(sim.angle) + (y - knee.y) * Math.cos(sim.angle)) * leg.def.side
+            const sign = localSide(knee.x + nx, knee.y + ny) >= 0 ? 1 : -1
+            const p2 = { x: knee.x + kx * 0.5 + nx * sign, y: knee.y + ky * 0.5 + ny * sign }
+            const p3 = {
+              x: knee.x + kx * 0.8 + nx * sign * 0.45,
+              y: knee.y + ky * 0.8 + ny * sign * 0.45,
+            }
             const hipX = fmt(hip.x)
             const hipY = fmt(hip.y)
-            const p1x = fmt(p1.x)
-            const p1y = fmt(p1.y)
+            const p1x = fmt(knee.x)
+            const p1y = fmt(knee.y)
             const p2x = fmt(p2.x)
             const p2y = fmt(p2.y)
             const p3x = fmt(p3.x)
@@ -2130,6 +2380,13 @@ window.__ModuleLoader__.load({
             setAttr(els.tibia, 'd', `M${p1x} ${p1y}L${p2x} ${p2y}`)
             setAttr(els.tarsus, 'd', `M${p2x} ${p2y}L${p3x} ${p3y}L${footXS} ${footYS}`)
             setAttr(els.trace, 'd', full)
+            /* 橙色信号沿腿从髋流向足尖；落足瞬间亮一下。 */
+            const pulse = Math.max(0, 1 - (now - leg.cyber.pulseAt) / 260)
+            setAttr(els.trace, 'stroke-dashoffset', fmt(-((now * 0.012 + leg.def.index * 2.3) % 7)))
+            const stretch = clamp(extension - 1.15, 0, 1)
+            setAttr(els.trace, 'opacity', fmt(0.42 + lift * 0.3 + pulse * 0.4 + stretch * 0.3))
+            if (els.tibia.style) els.tibia.style.strokeWidth = fmt(0.58 * clamp(1.25 - stretch * 0.6, 0.6, 1.25))
+            if (els.tarsus.style) els.tarsus.style.strokeWidth = fmt(0.44 * clamp(1.3 - stretch * 0.8, 0.45, 1.3))
             setAttr(els.hip, 'cx', hipX)
             setAttr(els.hip, 'cy', hipY)
             setAttr(els.hip, 'r', 1.2)
@@ -2141,41 +2398,54 @@ window.__ModuleLoader__.load({
             setAttr(els.ankle, 'r', 0.55)
             setAttr(els.foot, 'cx', footXS)
             setAttr(els.foot, 'cy', footYS)
-            setAttr(els.foot, 'r', (0.92 - lift * 0.2).toFixed(2))
-            setAttr(els.foot, 'opacity', (1 - lift * 0.3).toFixed(2))
-            setAttr(els.footShadow, 'cx', (footX + 1.4).toFixed(2))
-            setAttr(els.footShadow, 'cy', (footY + 2.2).toFixed(2))
-            setAttr(els.footShadow, 'r', 1.4)
-            setAttr(els.footShadow, 'opacity', (0.18 - lift * 0.1).toFixed(2))
+            setAttr(els.foot, 'r', fmt(0.92 - lift * 0.25 + pulse * 0.35))
+            setAttr(els.foot, 'opacity', fmt(1 - lift * 0.3))
+            setAttr(els.footShadow, 'cx', fmt(footX + 1.4 + lift * 2.6))
+            setAttr(els.footShadow, 'cy', fmt(footY + 2.2 + lift * 3.4))
+            setAttr(els.footShadow, 'r', fmt(1.4 + lift * 0.5))
+            setAttr(els.footShadow, 'opacity', fmt(0.18 - lift * 0.1))
             const sclaw = 2.2
             setAttr(
               els.claw,
               'd',
-              `M${footXS} ${(footY - sclaw).toFixed(2)}L${(footX + sclaw).toFixed(2)} ${footYS}L${footXS} ${(footY + sclaw).toFixed(2)}L${(footX - sclaw).toFixed(2)} ${footYS}Z`,
+              `M${footXS} ${fmt(footY - sclaw)}L${fmt(footX + sclaw)} ${footYS}L${footXS} ${fmt(footY + sclaw)}L${fmt(footX - sclaw)} ${footYS}Z`,
             )
-            setAttr(els.claw, 'opacity', (0.82 - lift * 0.4).toFixed(2))
+            setAttr(els.claw, 'opacity', fmt(0.82 - lift * 0.4))
           }
         }
 
+        /**
+         * 远距传输 = 一次网络请求：
+         *   out      编码：锁定框收紧，腿按组折回，身体量化缩小并拆成数据块；
+         *   transfer 传输：数据块排成一列沿八向链路跳过去，路由逐段点亮；
+         *   in       解码：数据块在终点汇合，身体逐级重建，两组腿先后展开，回 200 OK。
+         */
         const updateWarp = (now) => {
           const w = sim.warp
           if (!w) return
+          const at = (value, from, span) => clamp((value - from) / span, 0, 1)
+          const glitch = () => (Math.random() - 0.5) * 2.4
 
           if (w.stage === 'out') {
             const p = clamp((now - w.t0) / WARP_OUT_MS, 0, 1)
-            const e = ease(p)
-            sim.warpScale = 1 - e * 0.97
-            sim.warpLegPull = e
-            sim.warpSpin = e * 2.6
-            sim.warpVisible = 1
+            sim.warpLegPull = [ease(at(p, 0, 0.42)), ease(at(p, 0.08, 0.42))]
+            const dissolve = at(p, 0.5, 0.5)
+            sim.warpScale =
+              p < 0.5 ? 1 + Math.sin((Math.PI * p) / 0.5) * 0.1 : Math.ceil((1 - dissolve) * 4) / 4
+            sim.warpVisible = sim.warpScale > 0.01 ? 1 : 0
+            sim.warpGlitch = p > 0.4 ? glitch() : 0
+            const burst = ease(at(p, 0.55, 0.45))
             sim.warpState = {
-              from: w.from,
-              to: w.to,
-              aScale: 0.35 + e * 0.95,
-              aOpacity: Math.min(1, p * 5),
-              bScale: 0,
-              bOpacity: 0,
-              link: 0,
+              a: { opacity: Math.min(1, p * 4), frame: 40 - ease(at(p, 0, 0.6)) * 20, label: p > 0.15 ? `TX ${w.tag}` : '' },
+              b: { opacity: 0, frame: 40, label: '' },
+              route: Math.min(0.55, at(p, 0.3, 0.7) * 0.55),
+              lit: 0,
+              packets: w.src.map((offset, index) => ({
+                x: w.from.x + offset.x * burst,
+                y: w.from.y + offset.y * burst,
+                o: at(p, 0.55 + index * 0.02, 0.1),
+              })),
+              lead: 0,
             }
             if (p >= 1) {
               w.stage = 'transfer'
@@ -2186,72 +2456,357 @@ window.__ModuleLoader__.load({
               sim.ry = w.to.y
               sim.vx = 0
               sim.vy = 0
-              plantGrip(w.from)
-              plantGrip(w.to)
+              plantPing(w.from, 1.6)
               resetLegsForMotion(sim, MOTION_CYBER, now)
+              sim.warpLegPull = [1, 1]
             }
             return
           }
 
           if (w.stage === 'transfer') {
-            const p = clamp((now - w.t0) / WARP_TRANSFER_MS, 0, 1)
-            sim.warpScale = 0.02
-            sim.warpLegPull = 1
-            sim.warpSpin = 2.6
+            const p = clamp((now - w.t0) / w.transmitMs, 0, 1)
+            const stagger = 0.035
+            const span = 1 - stagger * (PACKET_COUNT - 1)
+            let lead = 0
+            const packets = w.src.map((src, index) => {
+              const s = minimumJerk(at(p, index * stagger, span))
+              lead = Math.max(lead, s)
+              const along = pointAlong(w.path, s * w.length)
+              const spread = 1 - Math.sin(Math.PI * s)
+              const offset = s < 0.5 ? src : w.dst[index]
+              return { x: along.x + offset.x * spread, y: along.y + offset.y * spread, o: 1 }
+            })
+            sim.warpScale = 0
             sim.warpVisible = 0
+            sim.warpGlitch = 0
             sim.warpState = {
-              from: w.from,
-              to: w.to,
-              aScale: 1.3 * (1 - p),
-              aOpacity: 1 - p,
-              bScale: 0.35 + p * 0.95,
-              bOpacity: p,
-              link: Math.sin(Math.PI * p) * 0.95,
+              a: { opacity: 1 - p, frame: 20 + p * 12, label: `TX ${w.tag}` },
+              b: { opacity: Math.min(1, p * 3), frame: 40 - ease(p) * 20, label: p > 0.3 ? 'RX …' : '' },
+              route: 0.55,
+              lit: lead,
+              packets,
+              lead,
             }
             if (p >= 1) {
               w.stage = 'in'
               w.t0 = now
-              sim.warpVisible = 1
-              sim.startle = 1
             }
             return
           }
 
-          if (w.stage === 'in') {
-            const p = clamp((now - w.t0) / WARP_IN_MS, 0, 1)
-            const e = ease(p)
-            sim.warpScale = 0.03 + e * 0.97
-            sim.warpLegPull = 1 - e
-            sim.warpSpin = (1 - e) * 2.6
-            sim.warpVisible = p > 0.06 ? 1 : 0
-            const fade = p > 0.72 ? 1 - (p - 0.72) / 0.28 : 1
-            sim.warpState = {
-              from: w.from,
-              to: w.to,
-              aScale: 0,
-              aOpacity: 0,
-              bScale: 0.35 + Math.min(1, p * 1.6) * 0.95,
-              bOpacity: Math.min(1, p * 5) * fade,
-              link: Math.max(0, 0.6 - p * 2),
+          const p = clamp((now - w.t0) / WARP_IN_MS, 0, 1)
+          const gather = ease(at(p, 0, 0.4))
+          const build = at(p, 0.15, 0.35)
+          sim.warpScale = Math.ceil(build * 4) / 4
+          sim.warpVisible = sim.warpScale > 0.01 ? 1 : 0
+          sim.warpGlitch = p < 0.5 && build > 0 ? glitch() : 0
+          sim.warpLegPull = [1 - ease(at(p, 0.32, 0.32)), 1 - ease(at(p, 0.46, 0.32))]
+          for (let group = 0; group < 2; group += 1) {
+            if (w.landed[group] || sim.warpLegPull[group] > 0.02) continue
+            w.landed[group] = true
+            for (const leg of sim.legs) {
+              if (leg.def.group !== group) continue
+              leg.cyber.pulseAt = now
+              plantGrip(leg.foot)
             }
-            if (p >= 1) {
-              const item = w.item
-              sim.warp = null
-              sim.warpState = null
-              sim.warpScale = 1
-              sim.warpLegPull = 0
-              sim.warpSpin = 0
-              sim.warpVisible = 1
-              sim.mode = 'perch'
-              sim.startle = 0.8
-              if (item) {
-                if (panelOpenRef.current) queueRef.current.unshift(item)
-                else if (apiRef.current) apiRef.current.showItem(item)
-              } else {
-                sim.mode = 'idle'
-                sim.nextWanderAt = now + 1200
+          }
+          const fade = 1 - at(p, 0.7, 0.3)
+          sim.warpState = {
+            a: { opacity: 0, frame: 24, label: '' },
+            b: {
+              opacity: fade,
+              frame: 20 + ease(at(p, 0.6, 0.4)) * 16,
+              label: p > 0.5 ? `200 OK ${w.tag}` : 'RX …',
+            },
+            route: 0.55 * fade,
+            lit: fade,
+            packets: w.dst.map((offset, index) => ({
+              x: w.to.x + offset.x * (1 - gather),
+              y: w.to.y + offset.y * (1 - gather),
+              o: 1 - at(p, 0.2 + index * 0.012, 0.22),
+            })),
+            lead: 1,
+          }
+          if (p >= 1) {
+            const item = w.item
+            abortWarp(sim)
+            plantPing(w.to, 1.4)
+            sim.mode = 'perch'
+            sim.startle = 0.5
+            if (item) {
+              if (panelOpenRef.current) queueRef.current.unshift(item)
+              else if (apiRef.current) apiRef.current.showItem(item)
+            } else {
+              sim.mode = 'idle'
+              sim.nextWanderAt = now + 1200
+              /* 巡游传输途中到达的提醒在 pump 里被挡住了，落地后补发。 */
+              if (queueRef.current.length > 0 && apiRef.current) apiRef.current.pump()
+            }
+          }
+        }
+
+        /** CYBER：沿八向路由走，拐点原地转身 + 节点扫描，步态由位移驱动。 */
+        const stepCyber = (now, dt) => {
+          const width = window.innerWidth || 1200
+          const height = window.innerHeight || 800
+          const reduced = reducedRef.current
+          const prevAngle = sim.angle
+          const travelling = !reduced && (sim.mode === 'walk' || sim.mode === 'run')
+
+          if (travelling) {
+            const run = sim.mode === 'run'
+            if (
+              !sim.routeFor ||
+              Math.hypot(sim.routeFor.x - sim.target.x, sim.routeFor.y - sim.target.y) > 1
+            ) {
+              /*
+               * 远距离不爬：回 dock / 去提醒点一律走数据包传输；巡游的长跳一半概率传输，
+               * 一半沿路由快爬，两种移动方式都能经常看到。
+               */
+              const far = Math.hypot(sim.target.x - sim.x, sim.target.y - sim.y) > WORMHOLE_DISTANCE
+              const wandering = sim.wandering
+              sim.wandering = false
+              if (far && (!wandering || Math.random() < 0.5)) {
+                const item = sim.pending
+                beginWarp(sim, sim.target, item, now)
+                return
               }
+              sim.route = planRoute({ x: sim.x, y: sim.y }, sim.target)
+              sim.routeIndex = 0
+              sim.routeFor = { x: sim.target.x, y: sim.target.y }
             }
+            const final = sim.routeIndex >= sim.route.length - 1
+            const waypoint = sim.route[Math.min(sim.routeIndex, sim.route.length - 1)] || sim.target
+            const dx = waypoint.x - sim.x
+            const dy = waypoint.y - sim.y
+            const dist = Math.hypot(dx, dy)
+            if (dist <= Math.max(3, Math.hypot(sim.vx, sim.vy) * dt * 1.1)) {
+              sim.x = waypoint.x
+              sim.y = waypoint.y
+              if (final) {
+                sim.vx = 0
+                sim.vy = 0
+                sim.route = []
+                sim.routeFor = null
+                plantPing(waypoint, 1.2)
+                const item = sim.pending
+                sim.pending = null
+                if (item) {
+                  sim.mode = 'perch'
+                  if (apiRef.current) apiRef.current.showItem(item)
+                } else {
+                  sim.mode = 'idle'
+                  sim.nextWanderAt = now + 1600 + Math.random() * 2600
+                }
+              } else {
+                sim.routeIndex += 1
+                sim.nodeHoldUntil = now + (run ? 0 : 40 + Math.random() * 60)
+                plantPing(waypoint, run ? 0.8 : 1)
+              }
+            } else {
+              const heading = Math.atan2(dy, dx)
+              const error = normalizeAngle(heading - sim.angle)
+              const turn = run ? 16 : 12
+              sim.angle += clamp(error, -turn * dt, turn * dt)
+              sim.targetAngle = sim.angle
+              /* 边转边走：大角度时降速但不完全停下，拐角是切出来的。 */
+              const align = clamp(1 - (Math.abs(error) - 0.3) / 0.9, 0.2, 1)
+              const maxSpeed = run ? CYBER_RUN_SPEED : CYBER_WALK_SPEED
+              const brake = final ? dist : dist + (run ? 90 : 30)
+              let desired = Math.min(maxSpeed, Math.sqrt(2 * (run ? 1700 : 800) * brake))
+              if (now < sim.nodeHoldUntil) desired = 0
+              /* 两组腿各蹬一次：一个步态周期内速度起伏两次。 */
+              /* 每次前腿抓住、后腿收回，身体被拽一下：一个周期两次明显的拉动。 */
+              desired *= align * (1 + 0.3 * Math.sin(sim.cyberCycle * Math.PI * 4))
+              const k = Math.min(1, dt * (run ? 12 : 9))
+              sim.vx += ((dx / dist) * desired - sim.vx) * k
+              sim.vy += ((dy / dist) * desired - sim.vy) * k
+              sim.x += sim.vx * dt
+              sim.y += sim.vy * dt
+            }
+            sim.x = clamp(sim.x, 64, width - 64)
+            sim.y = clamp(sim.y, 78, Math.max(78, height - 62))
+          } else {
+            sim.vx *= Math.exp(-dt * 12)
+            sim.vy *= Math.exp(-dt * 12)
+            if (
+              sim.mode === 'idle' &&
+              !reduced &&
+              !sim.pending &&
+              !bubbleRef.current &&
+              !panelOpenRef.current &&
+              now > sim.nextWanderAt
+            ) {
+              sim.target = randomPoint(width, height)
+              sim.routeFor = null
+              sim.wandering = true
+              sim.mode = 'walk'
+              sim.nextWanderAt = Number.POSITIVE_INFINITY
+            }
+            if (!reduced) {
+              if (now > sim.nextScanAt) {
+                sim.targetAngle = sim.angle + (Math.random() < 0.5 ? -1 : 1) * (0.3 + Math.random() * 0.5)
+                sim.nextScanAt = now + 3200 + Math.random() * 4200
+              }
+              sim.angle += clamp(normalizeAngle(sim.targetAngle - sim.angle), -3 * dt, 3 * dt)
+            }
+          }
+
+          const speed = Math.hypot(sim.vx, sim.vy)
+          const omega = dt > 0 ? normalizeAngle(sim.angle - prevAngle) / dt : 0
+          sim.omega += (omega - sim.omega) * Math.min(1, dt * 12)
+          sim.abdomenLag = clamp(-sim.omega * 0.1, -0.24, 0.24)
+          sim.startle = Math.max(0, sim.startle - dt * 3.2)
+
+          const effSpeed = speed + Math.abs(sim.omega) * 34
+          const cycleDist = 54 + Math.min(130, effSpeed * 0.3)
+          if (effSpeed > 6) sim.cyberCycle += (effSpeed * dt) / cycleDist
+          sim.cyberMove += ((effSpeed > 6 ? 1 : 0) - sim.cyberMove) * Math.min(1, dt * 6)
+
+          const phase = sim.cyberCycle * Math.PI * 2
+          sim.sway =
+            Math.sin(phase) * 1.1 * sim.cyberMove + Math.sin(now * 0.0011) * 0.25 * (1 - sim.cyberMove)
+          sim.surge = Math.sin(phase * 2) * 1.1 * sim.cyberMove
+          const ux = Math.cos(sim.angle)
+          const uy = Math.sin(sim.angle)
+          sim.rx = sim.x - uy * sim.sway + ux * sim.surge
+          sim.ry = sim.y + ux * sim.sway + uy * sim.surge
+
+          sim.routeAlpha += ((travelling && sim.route.length ? 1 : 0) - sim.routeAlpha) * Math.min(1, dt * 5)
+          if (travelling && sim.route.length) {
+            sim.routeDraw = [{ x: sim.x, y: sim.y }, ...sim.route.slice(sim.routeIndex)]
+          }
+
+          /* 拖链：从纺器拉出的一串链接点，停下后慢慢收回。 */
+          const tail = { x: sim.x - ux * 10, y: sim.y - uy * 10 }
+          const last = sim.trail[sim.trail.length - 1]
+          if (speed > 4) {
+            if (!last || Math.hypot(tail.x - last.x, tail.y - last.y) > 3) {
+              sim.trail.push(tail)
+              if (sim.trail.length > TRAIL_POINTS) sim.trail.shift()
+            }
+            sim.trailAt = now
+          } else if (sim.trail.length > 0 && now - sim.trailAt > 45) {
+            sim.trail.shift()
+            sim.trailAt = now
+          }
+
+          updateCyberLegs(now, effSpeed, cycleDist)
+        }
+
+        const renderNet = (now) => {
+          const cyber = motionRef.current === MOTION_CYBER
+          const warp = sim.warpState
+          const route = routeRef.current
+          const lit = routeLitRef.current
+          const nodes = routeNodeEls.current
+          let points = null
+          let routeOpacity = 0
+          if (warp && sim.warp) {
+            points = sim.warp.path
+            routeOpacity = warp.route
+          } else if (cyber && sim.routeAlpha > 0.02 && sim.routeDraw.length > 1) {
+            points = sim.routeDraw
+            routeOpacity = sim.routeAlpha * 0.32
+          }
+          if (route) {
+            if (points) setAttr(route, 'd', pathData(points))
+            setAttr(route, 'opacity', routeOpacity.toFixed(2))
+          }
+          if (lit) {
+            if (warp && sim.warp) {
+              setAttr(lit, 'd', pathData(sim.warp.path))
+              setAttr(lit, 'stroke-dasharray', `${warp.lit.toFixed(3)} 1`)
+              setAttr(lit, 'opacity', Math.min(1, warp.route * 1.8).toFixed(2))
+            } else {
+              setAttr(lit, 'opacity', 0)
+            }
+          }
+          let travelled = 0
+          const leadDist = warp && sim.warp ? warp.lead * sim.warp.length : 0
+          for (let index = 0; index < ROUTE_NODES; index += 1) {
+            const node = nodes[index]
+            if (!node) continue
+            const point = points && points[index + 1]
+            if (!point || routeOpacity <= 0.01) {
+              node.setAttribute('opacity', '0')
+              continue
+            }
+            const prev = points[index]
+            travelled += Math.hypot(point.x - prev.x, point.y - prev.y)
+            let opacity = Math.min(1, routeOpacity * 2.4)
+            let scale = 1
+            if (warp && sim.warp) {
+              const gap = (leadDist - travelled) / 24
+              const flash = leadDist >= travelled - 4 ? Math.exp(-gap * gap) : 0
+              opacity = Math.min(1, routeOpacity * 1.4 + flash)
+              scale = 1 + flash * 0.8
+            }
+            node.setAttribute(
+              'transform',
+              `translate(${point.x.toFixed(2)} ${point.y.toFixed(2)}) scale(${scale.toFixed(2)})`,
+            )
+            node.setAttribute('opacity', opacity.toFixed(2))
+          }
+
+          for (let index = 0; index < PACKET_COUNT; index += 1) {
+            const element = packetEls.current[index]
+            if (!element) continue
+            const packet = warp && warp.packets ? warp.packets[index] : null
+            if (!packet || packet.o <= 0.01) {
+              element.setAttribute('opacity', '0')
+              continue
+            }
+            element.setAttribute('transform', `translate(${packet.x.toFixed(2)} ${packet.y.toFixed(2)})`)
+            element.setAttribute('opacity', packet.o.toFixed(2))
+          }
+
+          const endpoints = endpointEls.current
+          const ends = warp && sim.warp ? [[warp.a, sim.warp.from], [warp.b, sim.warp.to]] : null
+          for (let index = 0; index < 2; index += 1) {
+            const slot = endpoints[index]
+            if (!slot || !slot.group) continue
+            const end = ends && ends[index]
+            if (!end || end[0].opacity <= 0.01) {
+              slot.group.setAttribute('opacity', '0')
+              continue
+            }
+            const [state, point] = end
+            slot.group.setAttribute('transform', `translate(${point.x.toFixed(2)} ${point.y.toFixed(2)})`)
+            slot.group.setAttribute('opacity', state.opacity.toFixed(2))
+            if (slot.frame) slot.frame.setAttribute('transform', `scale(${state.frame.toFixed(2)})`)
+            if (slot.label && slot.label.textContent !== state.label) slot.label.textContent = state.label
+          }
+
+          for (let index = 0; index < PING_SLOTS; index += 1) {
+            const slot = sim.pings[index]
+            const element = pingEls.current[index]
+            if (!element) continue
+            const age = (now - slot.at) / 720
+            if (age < 0 || age >= 1) {
+              element.setAttribute('opacity', '0')
+              continue
+            }
+            const scale = slot.size * (1 + ease(age) * 3.2)
+            element.setAttribute(
+              'transform',
+              `translate(${slot.x.toFixed(2)} ${slot.y.toFixed(2)}) rotate(45) scale(${scale.toFixed(2)})`,
+            )
+            element.setAttribute('opacity', ((1 - age) * 0.85).toFixed(2))
+          }
+
+          const trail = sim.trail
+          const thirds = Math.ceil(trail.length / 3)
+          for (let index = 0; index < 3; index += 1) {
+            const element = trailEls.current[index]
+            if (!element) continue
+            const slice = trail.slice(Math.max(0, index * thirds - 1), (index + 1) * thirds)
+            if (!cyber || slice.length < 2) {
+              element.setAttribute('opacity', '0')
+              continue
+            }
+            element.setAttribute('d', pathData(slice))
+            element.setAttribute('opacity', [0.14, 0.3, 0.55][index].toFixed(2))
           }
         }
 
@@ -2263,6 +2818,10 @@ window.__ModuleLoader__.load({
             updateWarp(now)
             return
           }
+          if (motionRef.current === MOTION_CYBER) {
+            stepCyber(now, dt)
+            return
+          }
           const prevAngle = sim.angle
           let speed = Math.hypot(sim.vx, sim.vy)
 
@@ -2270,12 +2829,7 @@ window.__ModuleLoader__.load({
             const dx = sim.target.x - sim.x
             const dy = sim.target.y - sim.y
             const dist = Math.hypot(dx, dy)
-            const maxSpeed =
-              sim.mode === 'run'
-                ? RUN_SPEED
-                : motionRef.current === MOTION_CYBER
-                  ? 58
-                  : WALK_SPEED
+            const maxSpeed = sim.mode === 'run' ? RUN_SPEED : WALK_SPEED
             if (dist <= 4) {
               sim.x = sim.target.x
               sim.y = sim.target.y
@@ -2293,30 +2847,12 @@ window.__ModuleLoader__.load({
             } else {
               const ux = dx / dist
               const uy = dy / dist
-              if (sim.mode === 'walk' && motionRef.current !== MOTION_CYBER && now > sim.nextBurstAt) {
+              if (sim.mode === 'walk' && now > sim.nextBurstAt) {
                 sim.pauseUntil = now + 260 + Math.random() * 420
                 sim.nextBurstAt = now + 2400 + Math.random() * 3200
               }
               let desired = Math.min(maxSpeed, Math.sqrt(2 * ACCEL * dist))
-              if (sim.mode === 'walk' && motionRef.current === MOTION_CYBER) {
-                let drag = 0
-                for (const leg of sim.legs) {
-                  const hip = legPoint(sim, leg, [leg.def.hip[0], leg.def.hip[1]])
-                  const relX = leg.foot.x - hip.x
-                  const relY = leg.foot.y - hip.y
-                  drag += Math.max(0, -(relX * ux + relY * uy))
-                }
-                const averageDrag = drag / Math.max(1, sim.legs.length)
-                let swingingNow = 0
-                for (const leg of sim.legs) if (leg.stepping) swingingNow += 1
-                const targetFactor =
-                  clamp(1 - averageDrag / 90, 0.38, 1) *
-                  clamp(1 - swingingNow * 0.08, 0.7, 1)
-                sim.cyberSpeedFactor +=
-                  (targetFactor - sim.cyberSpeedFactor) * Math.min(1, dt * 2.5)
-                desired *= sim.cyberSpeedFactor
-              }
-              if (sim.mode === 'walk' && motionRef.current !== MOTION_CYBER && now < sim.pauseUntil) {
+              if (sim.mode === 'walk' && now < sim.pauseUntil) {
                 desired = 0
               }
               const k = Math.min(1, dt * (sim.mode === 'run' ? 9 : 6))
@@ -2324,8 +2860,7 @@ window.__ModuleLoader__.load({
               sim.vy += (uy * desired - sim.vy) * k
               sim.x += sim.vx * dt
               sim.y += sim.vy * dt
-              const turn =
-                sim.mode === 'run' ? 8 : motionRef.current === MOTION_CYBER ? 4.5 : 3.2
+              const turn = sim.mode === 'run' ? 8 : 3.2
               const want = Math.atan2(sim.vy, sim.vx)
               sim.angle += clamp(normalizeAngle(want - sim.angle), -turn * dt, turn * dt)
               sim.targetAngle = sim.angle
@@ -2374,32 +2909,15 @@ window.__ModuleLoader__.load({
           sim.abdomenLag = clamp(-sim.omega * 0.09, -0.18, 0.18)
           sim.startle = Math.max(0, sim.startle - dt * 3.2)
 
-          const swayAmp =
-            motionRef.current === MOTION_CYBER
-              ? speed > 20
-                ? 1.05
-                : 0.8
-              : speed > 20
-                ? 0.8
-                : 0.55
+          const swayAmp = speed > 20 ? 0.8 : 0.55
           sim.sway = Math.sin(now * 0.0032) * swayAmp
-          sim.surge = walking
-            ? Math.sin(sim.gaitPhase * Math.PI * 2) *
-              (motionRef.current === MOTION_CYBER ? 1.1 : 0.9)
-            : motionRef.current === MOTION_CYBER
-              ? Math.sin(now * 0.0011) * 0.3
-              : 0
+          sim.surge = walking ? Math.sin(sim.gaitPhase * Math.PI * 2) * 0.9 : 0
           const ux = Math.cos(sim.angle)
           const uy = Math.sin(sim.angle)
           const px = -uy
           const py = ux
           sim.rx = sim.x + px * sim.sway + ux * sim.surge
           sim.ry = sim.y + py * sim.sway + uy * sim.surge
-
-          if (motionRef.current === MOTION_CYBER) {
-            updateCyberLegs(now)
-            return
-          }
 
           let swinging = 0
           const groupSwing = [0, 0]
@@ -2470,6 +2988,8 @@ window.__ModuleLoader__.load({
           const deg = (sim.angle * 180) / Math.PI
           const bodyScale = BODY_SCALE * (1 + sim.startle * 0.08) * (sim.warpScale ?? 1)
           const visible = sim.warpVisible !== 0
+          const gx = sim.rx + (sim.warpGlitch || 0)
+          const gy = sim.ry
           setAttr(bodyRef.current, 'opacity', visible ? 1 : 0)
           setAttr(legsLayerRef.current, 'opacity', visible ? 1 : 0)
           if (bodyShadowRef.current) bodyShadowRef.current.style.opacity = visible ? '' : '0'
@@ -2477,7 +2997,7 @@ window.__ModuleLoader__.load({
           setAttr(
             bodyRef.current,
             'transform',
-            `translate(${sim.rx.toFixed(2)} ${sim.ry.toFixed(2)}) rotate(${deg.toFixed(2)}) scale(${bodyScale.toFixed(4)})`,
+            `translate(${gx.toFixed(2)} ${gy.toFixed(2)}) rotate(${deg.toFixed(2)}) scale(${bodyScale.toFixed(4)})`,
           )
           setAttr(
             bodyShadowRef.current,
@@ -2497,6 +3017,10 @@ window.__ModuleLoader__.load({
             for (const leg of sim.legs) {
               const els = legEls.current[leg.def.index]
               if (!els || !els.femur) continue
+              if (els.tibia.style && els.tibia.style.strokeWidth) {
+                els.tibia.style.strokeWidth = ''
+                els.tarsus.style.strokeWidth = ''
+              }
               const hip = legPoint(sim, leg, [leg.def.hip[0], leg.def.hip[1]])
               let foot = leg.foot
             let lift = 0
@@ -2582,38 +3106,7 @@ window.__ModuleLoader__.load({
             }
           }
 
-          const warp = sim.warpState
-          if (warp) {
-            const setPortal = (group, scale, opacity, position) => {
-              if (!group) return
-              group.setAttribute(
-                'transform',
-                `translate(${position.x.toFixed(2)} ${position.y.toFixed(2)}) scale(${scale.toFixed(3)})`,
-              )
-              group.setAttribute('opacity', opacity.toFixed(2))
-            }
-            setPortal(portalARef.current, warp.aScale, warp.aOpacity, warp.from)
-            setPortal(portalBRef.current, warp.bScale, warp.bOpacity, warp.to)
-            if (warpLinkRef.current) {
-              const fx = warp.from.x
-              const fy = warp.from.y
-              const tx = warp.to.x
-              const ty = warp.to.y
-              const dx = tx - fx
-              const dy = ty - fy
-              const mx = (fx + tx) / 2 - dy * 0.12
-              const my = (fy + ty) / 2 + dx * 0.12
-              warpLinkRef.current.setAttribute(
-                'd',
-                `M${fx.toFixed(2)} ${fy.toFixed(2)}Q${mx.toFixed(2)} ${my.toFixed(2)} ${tx.toFixed(2)} ${ty.toFixed(2)}`,
-              )
-              warpLinkRef.current.setAttribute('opacity', warp.link.toFixed(2))
-            }
-          } else {
-            if (portalARef.current) portalARef.current.setAttribute('opacity', '0')
-            if (portalBRef.current) portalBRef.current.setAttribute('opacity', '0')
-            if (warpLinkRef.current) warpLinkRef.current.setAttribute('opacity', '0')
-          }
+          renderNet(now)
 
           for (let index = 0; index < GRIP_SLOTS; index += 1) {
             const slot = sim.grips[index]
@@ -2710,13 +3203,7 @@ window.__ModuleLoader__.load({
         const sim = simRef.current
         if (sim) {
           if (sim.warp) {
-            const pendingItem = sim.warp.item
-            sim.warp = null
-            sim.warpState = null
-            sim.warpScale = 1
-            sim.warpLegPull = 0
-            sim.warpSpin = 0
-            sim.warpVisible = 1
+            const pendingItem = abortWarp(sim)
             if (pendingItem) queueRef.current.unshift(pendingItem)
           }
           sim.mode = 'idle'
@@ -2745,13 +3232,7 @@ window.__ModuleLoader__.load({
         }
         if (sim) {
           if (sim.warp) {
-            const pendingItem = sim.warp.item
-            sim.warp = null
-            sim.warpState = null
-            sim.warpScale = 1
-            sim.warpLegPull = 0
-            sim.warpSpin = 0
-            sim.warpVisible = 1
+            const pendingItem = abortWarp(sim)
             if (pendingItem) queueRef.current.unshift(pendingItem)
           }
           if (sim.pending) {
@@ -2956,14 +3437,6 @@ window.__ModuleLoader__.load({
               h('stop', { offset: '1', stopColor: '#ff5a1f', stopOpacity: '0' }),
             ),
             h(
-              'radialGradient',
-              { id: 'ds-portal-core', cx: '50%', cy: '50%', r: '50%' },
-              h('stop', { offset: '0', stopColor: '#04070a', stopOpacity: '0.92' }),
-              h('stop', { offset: '0.5', stopColor: '#ff5a1f', stopOpacity: '0.22' }),
-              h('stop', { offset: '0.82', stopColor: '#ffb020', stopOpacity: '0.5' }),
-              h('stop', { offset: '1', stopColor: '#ff5a1f', stopOpacity: '0' }),
-            ),
-            h(
               'filter',
               { id: 'ds-soft-shadow', x: '-50%', y: '-50%', width: '200%', height: '200%' },
               h('feGaussianBlur', { stdDeviation: '3' }),
@@ -3004,10 +3477,66 @@ window.__ModuleLoader__.load({
           ),
           h(
             'g',
-            { className: 'ds-warp', 'aria-hidden': 'true' },
-            h('path', { ref: warpLinkRef, className: 'ds-warp__link' }),
-            h('g', { ref: portalARef, className: 'ds-portal' }, ...portalArt()),
-            h('g', { ref: portalBRef, className: 'ds-portal' }, ...portalArt()),
+            { className: 'ds-trail' },
+            ...[0, 1, 2].map((index) =>
+              h('path', {
+                key: `trail-${index}`,
+                ref: (element) => {
+                  trailEls.current[index] = element
+                },
+                className: 'ds-trail__seg',
+                opacity: '0',
+              }),
+            ),
+          ),
+          h(
+            'g',
+            { className: 'ds-net' },
+            h('path', { ref: routeRef, className: 'ds-net__route', opacity: '0' }),
+            h('path', { ref: routeLitRef, className: 'ds-net__lit', pathLength: '1', opacity: '0' }),
+            ...Array.from({ length: ROUTE_NODES }, (_, index) =>
+              h('path', {
+                key: `node-${index}`,
+                ref: (element) => {
+                  routeNodeEls.current[index] = element
+                },
+                className: 'ds-net__node',
+                d: 'M0 -2.4L2.4 0L0 2.4L-2.4 0Z',
+                opacity: '0',
+              }),
+            ),
+          ),
+          h(
+            'g',
+            { className: 'ds-pings' },
+            ...Array.from({ length: PING_SLOTS }, (_, index) =>
+              h('rect', {
+                key: `ping-${index}`,
+                ref: (element) => {
+                  pingEls.current[index] = element
+                },
+                className: 'ds-ping__shape',
+                x: '-2',
+                y: '-2',
+                width: '4',
+                height: '4',
+                opacity: '0',
+              }),
+            ),
+          ),
+          ...[0, 1].map((index) =>
+            h(
+              'g',
+              {
+                key: `endpoint-${index}`,
+                ref: (element) => {
+                  endpointEls.current[index].group = element
+                },
+                className: 'ds-ep',
+                opacity: '0',
+              },
+              ...endpointArt(endpointEls.current[index]),
+            ),
           ),
           h(
             'g',
@@ -3147,6 +3676,24 @@ window.__ModuleLoader__.load({
               h('circle', { className: 'ds-eye', cx: '15.6', cy: '2.6', r: '1.9' }),
               h('circle', { className: 'ds-eye', cx: '11.6', cy: '-3.4', r: '1.4' }),
               h('circle', { className: 'ds-eye', cx: '11.6', cy: '3.4', r: '1.4' }),
+            ),
+          ),
+          h(
+            'g',
+            { className: 'ds-packets' },
+            ...Array.from({ length: PACKET_COUNT }, (_, index) =>
+              h('rect', {
+                key: `packet-${index}`,
+                ref: (element) => {
+                  packetEls.current[index] = element
+                },
+                className: `ds-packet ds-packet--${'abc'[index % 3]}`,
+                x: '-1.7',
+                y: '-1.7',
+                width: '3.4',
+                height: '3.4',
+                opacity: '0',
+              }),
             ),
           ),
         ),
