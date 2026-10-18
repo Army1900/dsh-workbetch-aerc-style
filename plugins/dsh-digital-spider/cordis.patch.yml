@@ -1,0 +1,5 @@
+# 数字蜘蛛：Host 半部提供 /dsh-digital-spider/* 端点，
+# Client 半部在 shell.overlay 里渲染那只八足宠物。
+- insert:
+    - id: digital-spider
+      name: dsh-digital-spider

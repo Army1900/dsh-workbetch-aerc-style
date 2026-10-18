@@ -1,0 +1,38 @@
+{
+  "name": "dsh-scifi-industrial",
+  "version": "1.0.0",
+  "private": true,
+  "description": "未来重工业终端主题：科幻现实主义的启动画面与桌面配色，文案取自「非正常事件研究中心」内部终端。",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "theme",
+    "sci-fi",
+    "industrial"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "collection": "dsh-workbetch-aerc-style",
+  "version": 1,
+  "description": "AERC-style DeepSeek Harness workbench plugin collection.",
+  "plugins": [
+    {
+      "id": "dsh-scifi-industrial",
+      "path": "plugins/dsh-scifi-industrial",
+      "role": "theme",
+      "title": "AERC Heavy-Industry Terminal",
+      "install": "bundle"
+    },
+    {
+      "id": "dsh-news-wall",
+      "path": "plugins/dsh-news-wall",
+      "role": "panel",
+      "title": "News Wall",
+      "install": "profile-patch"
+    },
+    {
+      "id": "dsh-digital-spider",
+      "path": "plugins/dsh-digital-spider",
+      "role": "pet",
+      "title": "Digital Spider",
+      "install": "bundle"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "dsh-workbetch-aerc-style",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AERC-style DeepSeek Harness workbench: a collection of independently installable DSH UI plugins.",
+  "scripts": {
+    "verify": "node scripts/verify.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

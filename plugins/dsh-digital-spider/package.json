@@ -1,0 +1,40 @@
+{
+  "name": "dsh-digital-spider",
+  "version": "1.0.0",
+  "private": true,
+  "description": "未来工业风格的俯视数字蜘蛛桌面宠物：细长身体、八条两段式 IK 腿，整页爬行并把会话推进、定时任务与灵感提醒送到你面前。",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "pet",
+    "spider",
+    "desktop",
+    "industrial",
+    "scifi"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}

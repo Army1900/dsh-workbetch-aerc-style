@@ -1,0 +1,39 @@
+{
+  "name": "dsh-news-wall",
+  "version": "0.3.0",
+  "description": "时事大屏 —— DSH 网页面板插件：21 个中英文新闻源实时聚合，Mac 风格大屏展示，支持自动与手动刷新。",
+  "type": "module",
+  "main": "lib/index.mjs",
+  "exports": {
+    ".": {
+      "default": "./lib/index.mjs"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib",
+    "src",
+    "scripts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "probe": "node scripts/probe.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "news",
+    "dashboard"
+  ],
+  "license": "MIT"
+}

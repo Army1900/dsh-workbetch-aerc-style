@@ -1,0 +1,9 @@
+# 侧栏 chrome 接管：禁用宿主 ui-sidebar，由本插件重新声明侧栏座位；
+# 工作区浏览器、设置、面板图标仍由各自插件注入到这些座位。
+- id: ui-sidebar
+  name: '@deepseek-ai/dsh-client-ui-sidebar'
+  disabled: true
+
+- insert:
+    - id: dsh-scifi-industrial
+      name: dsh-scifi-industrial
