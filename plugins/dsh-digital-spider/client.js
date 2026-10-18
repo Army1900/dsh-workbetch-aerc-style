@@ -3522,16 +3522,35 @@ window.__ModuleLoader__.load({
         'digital-spider: overlay seat',
       )
 
-      ctx.effect(
-        () =>
-          ctx.slots.inject('sidebar.session.row.leading', () =>
-            ctx.slots.register(
-              { name: 'sidebar.session.row.leading', id: 'digital-spider-anchor', order: 20 },
-              SessionRowAnchor,
-            ),
-          ),
-        'digital-spider: session row anchor',
-      )
+      ctx.effect(() => {
+        let off = null
+        let timer = 0
+        let tries = 0
+
+        const mount = () => {
+          try {
+            off = ctx.slots.inject('sidebar.session.row.leading', () =>
+              ctx.slots.register(
+                { name: 'sidebar.session.row.leading', id: 'digital-spider-anchor', order: 20 },
+                SessionRowAnchor,
+              ),
+            )
+          } catch (error) {
+            /* 侧栏 slot 可能在插件 apply 时还没声明；不要让它拖垮整个 overlay。 */
+            console.error('[digital-spider] 会话行锚点注册失败，稍后重试：', error)
+            if (tries < 8) {
+              tries += 1
+              timer = window.setTimeout(mount, 500)
+            }
+          }
+        }
+
+        mount()
+        return () => {
+          if (timer) window.clearTimeout(timer)
+          if (typeof off === 'function') off()
+        }
+      }, 'digital-spider: session row anchor')
     }
 
     return { inject: ['slots', 'locale'], apply }
