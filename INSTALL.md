@@ -160,7 +160,7 @@ ln -sfn "$SDD_DIR" "$PROFILE_DIR/node_modules/dsh-e2e-dev-sdd"
 
 ## 4. 安装 OpenMind 技能集合（蜘蛛点子用）
 
-`dsh-digital-spider` 在生成点子时会读取本地 OpenMind 技能集合：加载全部技能目录，按会话内容选 1–2 个技能，把技能说明和会话上下文一起交给模型，最后输出结构化的 `title / suggestion / rationale / skill`。**OpenMind 不是 DSH bundle，不要 `install_bundle`；它只是集合外的一份 Markdown 数据。**
+`dsh-digital-spider` 在生成点子时会读取本地 OpenMind 技能集合。自动点子走两轮模型调用：第一轮只做技能路由（7 个技能，选一个技能和模式），第二轮按该技能自己的输出契约生成诗/梦境/反转/类比等形态；状态面板里也可以手动指定形态。**OpenMind 不是 DSH bundle，不要 `install_bundle`；它只是集合外的一份 Markdown 数据。**
 
 ```sh
 mkdir -p "$EXTERNAL_DIR"
@@ -201,7 +201,7 @@ PY
 - 四个包都能解析，三个集合插件指向 `$WORKBENCH_DIR/plugins/...`，SDD 指向 `$SDD_DIR`。
 - 主题/启动序列、News Wall、Digital Spider 可见；SDD 的「项目开发」分组可见。
 - `GET /dsh-digital-spider/state` 返回 200，`running` 字段正常；`openmind.available` 为 `true`，`skillCount` 为 7。
-- `POST /dsh-digital-spider/idea` 带一个 `sessionId` 时返回 `format: 2` 的 `ideaTitle / suggestion / rationale / skill`；自动点子来自会话收尾，不再由 7 分钟随机定时器抽会话。
+- `POST /dsh-digital-spider/idea` 带 `sessionId` + `skill` + `mode` 时返回 `format: 3` 的技能形态（例如 `poetic-essence` 的 `artifact.poem / attribution / interpretation / implication`）；不带 `skill` 的自动请求会先做一轮路由再生成。自动点子来自会话收尾，不再由 7 分钟随机定时器抽会话。
 - 如果宠物在插件重载后消失，刷新页面；如果 SDD/主题在 profile 改动后不生效，完全退出重开应用。
 - 安装后如果出现两个同名插入行或两个依赖链接，先还原备份，只保留一个。
 

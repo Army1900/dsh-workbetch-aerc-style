@@ -4,8 +4,8 @@ DeepSeek Harness Web 桌面上的未来工业八足宠物。**俯视视角**，�
 
 - **会话关注**：每个空闲会话行左侧有一个 5px 蜘蛛锚点；会话收尾后，蜘蛛才去对应行。它不为每次开始/结束弹通用提示；没有事件时会从右下角 dock 缓慢巡游，走一段停一段。
 - **定时任务**：任务进入触发前 2 分钟、真正到点时，蜘蛛在右下角 dock 提醒；45 分钟内有任务时脚边会挂倒计时小牌。
-- **点子**：会话收尾 2 秒后（每会话 20 分钟冷却、全局 2 分钟间隔），读该会话最后内容，加载本地 **OpenMind** 技能集合，挑 1–2 个技能一起推演，输出带 `title / suggestion / rationale / skill` 的结构化点子；模型失败时不硬凑自动点子，手动按钮保留本地模板。
-- **状态面板**：点蜘蛛身体打开 `DIGITAL SPIDER // PET-07`，看推进中的会话、接下来三条任务、最新点子、点子抽屉与 OpenMind 加载状态；可以点「再想一个」当场再推演一次。
+- **形态化点子**：会话收尾 2 秒后（每会话 20 分钟冷却、全局 2 分钟间隔），读该会话最后内容。第一轮模型只做技能路由：从 **OpenMind** 的 7 个技能里选一个技能和模式；第二轮按该技能自己的输出契约生成真正的形态：诗（`poetic-essence`）、梦境（`deep-dream`）、约束反转、跨域类比、明心定向、事上练、知行复盘。卡片按形态渲染，不再把一切都压成一句建议。
+- **状态面板**：点蜘蛛身体打开 `DIGITAL SPIDER // PET-07`，看推进中的会话、接下来三条任务、最新点子、点子抽屉与 OpenMind 加载状态；「点子形态」里可以选自动或指定诗/梦境/反转等，按这个形态当场生成。
 
 ## 两种动效（状态面板可切换）
 
@@ -58,7 +58,7 @@ DeepSeek Harness Web 桌面上的未来工业八足宠物。**俯视视角**，�
 
 ```text
 GET  /dsh-digital-spider/state   # 会话、任务、点子抽屉、OpenMind 状态
-POST /dsh-digital-spider/idea    # 带 sessionId 当场再推演一个点子
+POST /dsh-digital-spider/idea    # { sessionId?, skill?, mode? } 当场生成一个形态
 ```
 
 端点放在 `/api` 之外（`/api` 是框架自己的前缀路由）；只接受回环地址与同源页面，跨站请求会被 `sec-fetch-site` 检查挡掉。状态全部在内存里，不写盘，也不往会话日志追加任何东西。
@@ -113,8 +113,9 @@ Client 侧在 `client.js` 顶部：
 - `install_bundle` 返回 `application: applied`，无 warnings；Bundle 列表里 `dsh-digital-spider` 为 enabled / installed；
 - Client 侧 `shell.overlay` 的 `digital-spider-pet` occupant 为 active（order `-4`，位于机架之上、toast 之下）；
 - `GET /dsh-digital-spider/state` 返回 `v: 1`，`sessionController` 的 running 基线与当前会话一致；`openmind.available` 为 `true`，`skillCount` 为 7；
-- `POST /dsh-digital-spider/idea` 带 `sessionId` 时成功调用默认模型，读取 OpenMind 技能，返回 `format: 2` 的 `ideaTitle / suggestion / rationale / skill`，并把 `idea` 写入快照与抽屉；
-- 用 headless 冒烟测试渲染了 `SpiderPet`：结构化点子卡片、会话行锚点退回 dock、CYBER 数据包传输、状态面板与 `ORGANIC / CYBER` 切换都能跑；测试里点子卡片断言 `ds-pop__why` 存在。
+- `POST /dsh-digital-spider/idea` 手动指定 `skill=poetic-essence, mode=READ` 时成功返回 `format: 3` 的 `artifact.poem / attribution / interpretation / implication`，并写入快照与抽屉；
+- 不带 `skill` 的自动请求会先走一轮模型路由，再按选中的技能生成形态；实测自动路由选择了 `act-on-ground`，生成 `step / acceptance`；
+- 用 headless 冒烟测试渲染了 `SpiderPet`：诗卡（`ds-pop__poem`）、形态选择器（`ds-form__select`）、结构化点子、会话行锚点退回 dock、CYBER 数据包传输、状态面板与 `ORGANIC / CYBER` 切换都能跑。
 
 未验证或受环境限制：
 
@@ -127,6 +128,6 @@ Client 侧在 `client.js` 顶部：
 - 蜘蛛本体与抓握环属于 artwork，使用固定的工业色（烟黑、金属灰、安全橙、少量青）；气泡、面板、按钮底色与文字全部走 `--dsw-alias-*` token，明暗主题自动跟随。
 - 不静默修改宿主：不替换应用根、不往 `document.body` 追加东西、不 require Harness Client 包；只通过 `shell.overlay` 注册一只宠物。
 - 会话状态以 `api-session/status` / `api-session/activity` 为准，标题与摘要经 `sessionQuery` 补读；不轮询 `agent/status`，也不重扫会话日志。
-- 点子生成会把**所选会话的标题、最近一条用户消息和最近一条助手回复**（各截断）以及**本地选中的 OpenMind 技能说明**发给当前默认模型；这是本插件唯一的外发内容。OpenMind 源码保存在集合外的独立克隆里，不进入 workbench 仓库。
+- 点子生成是两轮模型调用：第一轮发送会话上下文 + 7 个技能目录用于路由；第二轮发送**所选会话的标题、最近用户/助手片段**（各截断）以及**所选 OpenMind 技能的说明**用于生成形态。OpenMind 源码保存在集合外的独立克隆里，不进入 workbench 仓库。
 - 会话锚点只注册在宿主提供的 `sidebar.session.row.leading` 槽位，渲染自己的 5px 节点；点击锚点由 DOM 冒泡交给会话行自己的打开逻辑，不读取别的插件 DOM。
 - 腿的落点是页面上的世界坐标；除自己的行锚点外，它不会读取宿主的按钮/卡片位置。

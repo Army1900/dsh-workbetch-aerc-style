@@ -65,8 +65,114 @@ const OPENMIND_MAX_SKILL_CHARS = 2_600
 const OPENMIND_MAX_IDEAS = 20
 /** 单次推演最多读多少上下文。 */
 const IDEA_CONTEXT_CHARS = 700
-const IDEA_MAX_TOKENS = 900
+const IDEA_MAX_TOKENS = 1200
+const ROUTER_MAX_TOKENS = 260
 const BODY_LIMIT = 16 * 1024
+
+/**
+ * Each OpenMind skill has its own output shape. The router picks one skill + mode;
+ * the generator then fills that shape instead of flattening everything into one line.
+ */
+const SKILL_FORMS = {
+  'poetic-essence': {
+    label: '诗意点睛',
+    modes: ['READ', 'WRITE'],
+    defaultMode: 'READ',
+    prompt:
+      'READ：找一首真实存在的中国古诗或名句来照见当前会话；attribution 给出作者与篇名；interpretation 解释这首诗和当前处境的对应；implication 给出对项目的启示；nextStep 可选。WRITE：为当前时刻写一首短诗，可以引用或化用古诗；attribution 标注“引用/化用/原创”。不要编造不存在的出处；不确定就化用并标注“化用”。',
+    fields: {
+      poem: { max: 600, multiline: true, required: true },
+      attribution: { max: 90, required: false },
+      interpretation: { max: 240, required: true },
+      implication: { max: 200, required: true },
+      nextStep: { max: 160, required: false },
+    },
+    labels: {
+      interpretation: '解读',
+      implication: '对项目的启示',
+      nextStep: '下一步',
+    },
+  },
+  'deep-dream': {
+    label: '深度梦境',
+    modes: ['DREAM'],
+    defaultMode: 'DREAM',
+    prompt:
+      '用梦境逻辑写一段第一人称、现在时的超现实梦境；把当前会话里的元素变形后放进去；醒来后把梦的意象翻译成一条洞察，再给一个可选的下一步。',
+    fields: {
+      dream: { max: 520, multiline: true, required: true },
+      insight: { max: 220, required: true },
+      nextStep: { max: 160, required: false },
+    },
+    labels: { dream: '梦境', insight: '洞察', nextStep: '下一步' },
+  },
+  'constraint-flip': {
+    label: '约束反转',
+    modes: ['FLIP'],
+    defaultMode: 'FLIP',
+    prompt:
+      '明确说出当前约束，把它反转成特性、过滤器或设计原则，再给一个落地的下一步。不要泛泛鼓励。',
+    fields: {
+      constraint: { max: 160, required: true },
+      flipped: { max: 240, required: true },
+      nextStep: { max: 160, required: true },
+    },
+    labels: { constraint: '约束', flipped: '反转', nextStep: '下一步' },
+  },
+  'cross-domain': {
+    label: '跨域类比',
+    modes: ['BRIDGE'],
+    defaultMode: 'BRIDGE',
+    prompt:
+      '从自然、艺术、建筑或其他领域借一个具体机制，映射到当前问题上；说明映射关系与边界，再给一个下一步。',
+    fields: {
+      analogy: { max: 300, required: true },
+      insight: { max: 220, required: true },
+      nextStep: { max: 160, required: true },
+    },
+    labels: { analogy: '类比', insight: '洞察', nextStep: '下一步' },
+  },
+  'clarify-intent': {
+    label: '明心定向',
+    modes: ['CLARIFY'],
+    defaultMode: 'CLARIFY',
+    prompt:
+      '把当前真正要解决的问题说清楚，指出表面诉求和真实意图的差别；给一个关键问题，再给一个下一步。',
+    fields: {
+      intent: { max: 200, required: true },
+      question: { max: 180, required: true },
+      nextStep: { max: 160, required: true },
+    },
+    labels: { intent: '意图', question: '关键问题', nextStep: '下一步' },
+  },
+  'act-on-ground': {
+    label: '事上练',
+    modes: ['ACT'],
+    defaultMode: 'ACT',
+    prompt:
+      '给一个能马上执行的具体动作，并写清怎样算完成（验收标准）。不要写计划口号。',
+    fields: {
+      step: { max: 240, required: true },
+      acceptance: { max: 160, required: true },
+    },
+    labels: { step: '下一步', acceptance: '验收' },
+  },
+  'reflect-anchor': {
+    label: '知行复盘',
+    modes: ['REFLECT'],
+    defaultMode: 'REFLECT',
+    prompt:
+      '从本次会话提炼一个真实的教训或模式，给它一个能带走的锚点（一句可复用的原则），再给一个下一步。',
+    fields: {
+      lesson: { max: 240, required: true },
+      anchor: { max: 160, required: true },
+      nextStep: { max: 160, required: true },
+    },
+    labels: { lesson: '教训', anchor: '锚点', nextStep: '下一步' },
+  },
+}
+
+const SKILL_FORM_NAMES = Object.keys(SKILL_FORMS)
 
 /* ────────────────────────────── 插件入口 ────────────────────────────── */
 
@@ -579,36 +685,38 @@ function pushEvent(state, kind, data) {
   }
 }
 
-async function produceIdea(state, trigger, requestedSessionId) {
+async function produceIdea(state, trigger, requestedSessionId, requestedSkill, requestedMode) {
   if (state.ideaBusy || state.disposed) return null
   state.ideaBusy = true
   state.nextIdeaAt = Date.now() + IDEA_GAP_MS
 
   try {
-    const openmind = refreshOpenmind(state, true)
+    refreshOpenmind(state, true)
     const pick = await pickIdeaSession(state, requestedSessionId)
     if (!pick) return null
     const context = await readIdeaContext(state, pick.id)
     if (!context.userText && !context.assistantText) return null
 
-    const skills = selectOpenmindSkills(openmind?.skills || [], pick.title, context)
+    /* 第一轮：模型先选技能和模式；手动指定时跳过。 */
+    const route = await routeIdea(state, pick.title, context, requestedSkill, requestedMode)
+    if (!route) return null
+
     let payload = null
     let source = 'model'
     try {
-      payload = await generateModelIdea(state, pick.title, context, skills)
+      payload = await generateModelIdea(state, pick.title, context, route.skill, route.mode)
     } catch (error) {
-      console.error('[digital-spider] 模型推演失败：', error)
+      console.error('[digital-spider] 技能形态生成失败：', error)
     }
 
-    /* 自动点子宁可不冒，也不要硬凑一句通用话；手动按钮保留本地模板兜底。 */
+    /* 自动点子宁可不冒，也不要硬凑；手动只在执行型技能上保留本地兜底。 */
     if (!payload) {
-      if (trigger !== 'manual') return null
-      payload = localIdeaPayload(pick.title, context, skills)
+      if (trigger !== 'manual' || route.skill !== 'act-on-ground') return null
+      payload = localActPayload(pick.title)
       source = 'local'
     }
-    if (!payload) return null
 
-    const idea = buildIdea(payload, pick, source, trigger, skills)
+    const idea = buildIdea(payload, pick, source, trigger, route)
     state.idea = idea
     state.ideas.push(idea)
     if (state.ideas.length > OPENMIND_MAX_IDEAS) {
@@ -624,12 +732,15 @@ async function produceIdea(state, trigger, requestedSessionId) {
       suggestion: idea.suggestion,
       rationale: idea.rationale,
       skill: idea.skill,
+      skillLabel: idea.skillLabel,
+      mode: idea.mode,
+      artifact: idea.artifact,
       skillReason: idea.skillReason,
       sessionId: idea.sessionId,
       sessionTitle: idea.sessionTitle,
       source: idea.source,
       trigger: idea.trigger,
-      format: 2,
+      format: 3,
     })
     return idea
   } catch (error) {
@@ -673,39 +784,39 @@ async function readIdeaContext(state, sessionId) {
   return { userText, assistantText }
 }
 
-async function generateModelIdea(state, title, context, selectedSkills) {
+async function generateModelIdea(state, title, context, skillName, mode) {
+  const form = SKILL_FORMS[skillName]
+  if (!form) return null
   const llm = service(state.ctx, 'llm')
   if (!llm || typeof llm.stream !== 'function') return null
   const selection = await resolveModel(state.ctx, llm)
   if (!selection) return null
 
-  const allSkills = state.openmind?.skills?.length ? state.openmind.skills : selectedSkills
-  const catalog = allSkills
-    .map((skill) => `- ${skill.name}: ${skill.description}`)
+  const loaded = state.openmind?.skills?.find((skill) => skill.name === skillName)
+  const fieldLines = Object.entries(form.fields)
+    .map(([key, spec]) => {
+      const parts = [spec.required ? '必填' : '可选', `最多 ${spec.max} 字`]
+      if (spec.multiline) parts.push('可多行')
+      return `${key}：${parts.join('，')}`
+    })
     .join('\n')
-  const selected = selectedSkills.length > 0 ? selectedSkills : allSkills.slice(0, 1)
-  const allowed = selected.map((skill) => skill.name)
-  const bodies = selected
-    .map((skill) => `## ${skill.name}\n${skill.body}`)
-    .join('\n\n')
 
   const lines = [
-    '你是一只趴在用户桌面上的数字蜘蛛，负责从一个刚结束的会话里冒出一个具体、可执行的点子。',
-    '你会使用 OpenMind 思维技能，但输出必须是落在用户刚才工作上的下一步，不是技能说明。',
+    '你是趴在用户桌面上的数字蜘蛛。现在必须按一个 OpenMind 技能的真实输出形态生成，而不是把它压成一句通用建议。',
+    `技能：${skillName}（${form.label}）  模式：${mode}`,
     '',
-    'OpenMind 技能目录（帮助判断该用什么思维方式）：',
-    catalog || '- act-on-ground: 把已确认的结论落成下一步。',
+    '技能说明：',
+    loaded?.body || '（未加载到该技能正文，按下面的形态契约执行）',
     '',
-    '本轮重点参考的技能（skill 字段只能从这些名字里选）：',
-    bodies || '（没有加载到 OpenMind，按 act-on-ground 的方式处理）',
+    '本形态要求：',
+    form.prompt,
     '',
-    '只输出一个 JSON 对象，不要代码围栏、不要解释、不要 Markdown。字段格式：',
-    '{"title":"点子标题，8-40字","suggestion":"具体下一步，20-100字","rationale":"为什么现在做/依据，15-80字","skill":"' +
-      (allowed[0] || 'act-on-ground') +
-      '","skillReason":"为什么用这个技能，10-60字"}',
-    '要求：title 不要直接复述会话标题；suggestion 必须能马上动手；rationale 引用会话里的具体事实；skill 必须是 ' +
-      allowed.join('/') +
-      ' 之一。',
+    'artifact 字段：',
+    fieldLines,
+    '',
+    '只输出一个 JSON 对象，不要代码围栏、不要解释、不要 Markdown：',
+    '{"title":"形态标题，8-40字","rationale":"为什么此刻用这个形态/依据，15-80字","skillReason":"为什么这个技能适合，10-60字","artifact":{...上面列出的字段...}}',
+    '所有文本使用与用户最近消息相同的语言；不要编造古诗出处，不确定就化用并标注“化用”。',
     '',
     `会话标题：${title || '未命名会话'}`,
   ]
@@ -717,11 +828,11 @@ async function generateModelIdea(state, title, context, selectedSkills) {
   const stream = llm.stream({
     provider: selection.provider,
     model: selection.model,
-    system: '你是简洁、务实的中文创意观察器。只输出一个合法 JSON 对象。',
+    system: '你是数字蜘蛛。只输出一个合法 JSON 对象；严格按选定技能的输出形态生成。',
     messages: [{ role: 'user', content: [{ type: 'text', text: lines.join('\n') }] }],
-    temperature: 0.8,
+    temperature: 0.9,
     maxTokens: IDEA_MAX_TOKENS,
-    signal: AbortSignal.timeout(45_000),
+    signal: AbortSignal.timeout(60_000),
   })
 
   for await (const chunk of stream) {
@@ -731,7 +842,63 @@ async function generateModelIdea(state, title, context, selectedSkills) {
       return null
     }
   }
-  return parseIdeaPayload(text, allowed)
+  return parseSkillPayload(text, skillName, mode)
+}
+
+async function routeIdea(state, title, context, requestedSkill, requestedMode) {
+  const manual = normalizeRoute(requestedSkill, requestedMode)
+  if (manual) return manual
+
+  const llm = service(state.ctx, 'llm')
+  if (llm && typeof llm.stream === 'function') {
+    try {
+      const selection = await resolveModel(state.ctx, llm)
+      if (selection) {
+        const recent = state.ideas
+          .slice(-4)
+          .map((idea) => `${idea.skill}/${idea.mode}`)
+          .join(', ')
+        const lines = [
+          '你是数字蜘蛛的技能路由器。只选一个 OpenMind 技能和一个模式，让点子的形态真正改变。',
+          '先贴合会话此刻；如果最近连续使用同一个技能，就换一个合适的形态；没有自然时机不要硬读诗。',
+          '会话刚完成/收尾：poetic-essence（WRITE 或 READ）或 reflect-anchor；卡住/反复：constraint-flip 或 deep-dream；需要借视角：cross-domain；目标不清：clarify-intent；要执行：act-on-ground。',
+          '',
+          '技能目录（skill 必须是下列名字；mode 必须在该技能 modes 内）：',
+          skillCatalog(state),
+          '',
+          `最近形态：${recent || '无'}`,
+          `会话标题：${title || '未命名会话'}`,
+        ]
+        if (context.userText) lines.push(`用户最近说：${context.userText}`)
+        if (context.assistantText) lines.push(`助手最近回复：${context.assistantText}`)
+        lines.push(
+          '',
+          '只输出一个 JSON 对象，不要代码围栏：',
+          '{"skill":"技能名","mode":"模式","reason":"为什么此刻用这个形态，10-50字"}',
+        )
+
+        let text = ''
+        const stream = llm.stream({
+          provider: selection.provider,
+          model: selection.model,
+          system: '你是技能路由器。只输出一个合法 JSON 对象。',
+          messages: [{ role: 'user', content: [{ type: 'text', text: lines.join('\n') }] }],
+          temperature: 0.5,
+          maxTokens: ROUTER_MAX_TOKENS,
+          signal: AbortSignal.timeout(25_000),
+        })
+        for await (const chunk of stream) {
+          if (!chunk || typeof chunk !== 'object') continue
+          if (chunk.type === 'text-delta' && typeof chunk.text === 'string') text += chunk.text
+        }
+        const route = parseRoute(text)
+        if (route) return route
+      }
+    } catch (error) {
+      console.error('[digital-spider] 技能路由失败，改用本地规则：', error)
+    }
+  }
+  return routeSkillFallback(state, title, context)
 }
 
 async function resolveModel(ctx, llm) {
@@ -778,8 +945,25 @@ function cleanField(value, limit) {
   )
 }
 
-function parseIdeaPayload(raw, allowed) {
-  if (typeof raw !== 'string') return null
+function cleanMultiline(value, max) {
+  if (typeof value !== 'string') return ''
+  let text = value
+    .replace(/^```[a-zA-Z]*\s*\n/, '')
+    .replace(/\n```\s*$/, '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.replace(/\s+$/, '').trimStart())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .replace(/^["'「『]+|["'」』]+$/g, '')
+  if (text.length > max) text = `${text.slice(0, Math.max(0, max - 1))}…`
+  return text
+}
+
+function parseSkillPayload(raw, skillName, mode) {
+  const form = SKILL_FORMS[skillName]
+  if (!form || typeof raw !== 'string') return null
   const text = raw
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
@@ -793,62 +977,95 @@ function parseIdeaPayload(raw, allowed) {
   } catch {
     return null
   }
-  const title = cleanField(data.title, 64)
-  const suggestion = cleanField(data.suggestion, 220)
-  const rationale = cleanField(data.rationale, 180)
-  if (title.length < 4 || suggestion.length < 8) return null
-  const names = Array.isArray(allowed) ? allowed : []
-  const skill = names.find((name) => name === data.skill) || names[0] || ''
+  const artifactSource =
+    data.artifact && typeof data.artifact === 'object' ? data.artifact : data
+  const artifact = {}
+  for (const [key, spec] of Object.entries(form.fields)) {
+    const value = artifactSource[key]
+    const cleaned = spec.multiline
+      ? cleanMultiline(value, spec.max)
+      : cleanField(value, spec.max)
+    if (cleaned) artifact[key] = cleaned
+    else if (spec.required) return null
+  }
+  if (skillName === 'poetic-essence' && mode === 'READ' && !artifact.attribution) return null
   return {
-    title,
-    suggestion,
-    rationale: rationale || '基于刚才会话的收尾内容。',
-    skill,
+    title: cleanField(data.title, 64),
+    rationale: cleanField(data.rationale, 180),
     skillReason: cleanField(data.skillReason, 120),
+    artifact,
   }
 }
 
-function formatIdeaText(payload, sessionTitle) {
-  const lines = [payload.title, payload.suggestion]
-  if (payload.rationale) lines.push('', `为什么：${payload.rationale}`)
-  if (payload.skill) lines.push(`技能：${payload.skill}`)
+function formatIdeaArtifact(payload, skillName, mode, sessionTitle) {
+  const form = SKILL_FORMS[skillName]
+  const artifact = payload.artifact || {}
+  const lines = []
+  if (skillName === 'poetic-essence') {
+    lines.push(artifact.poem)
+    if (artifact.attribution) lines.push(`—— ${artifact.attribution}`)
+    lines.push('', `解读：${artifact.interpretation}`, `对项目的启示：${artifact.implication}`)
+    if (artifact.nextStep) lines.push(`下一步：${artifact.nextStep}`)
+  } else {
+    for (const [key, spec] of Object.entries(form?.fields || {})) {
+      if (artifact[key]) lines.push(`${form?.labels?.[key] || key}：${artifact[key]}`)
+    }
+  }
+  if (payload.rationale) lines.push('', `为什么是现在：${payload.rationale}`)
+  lines.push(`形态：${form?.label || skillName} · ${mode}`)
   if (sessionTitle) lines.push(`来自：${sessionTitle}`)
   return lines.join('\n')
 }
 
-function buildIdea(payload, record, source, trigger, skills) {
+function buildIdea(payload, record, source, trigger, route) {
   const sessionTitle = record.title || ''
+  const artifact = payload.artifact || {}
+  const suggestion =
+    artifact.nextStep ||
+    artifact.implication ||
+    artifact.insight ||
+    artifact.step ||
+    artifact.flipped ||
+    artifact.intent ||
+    artifact.lesson ||
+    artifact.poem ||
+    ''
+  const form = SKILL_FORMS[route.skill]
   return {
     id: `idea-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-    ideaTitle: payload.title,
-    suggestion: payload.suggestion,
+    ideaTitle: payload.title || `${form?.label || '点子'} · ${sessionTitle}`,
+    suggestion,
     rationale: payload.rationale,
-    skill: payload.skill || '',
-    skillReason: payload.skillReason || '',
-    text: formatIdeaText(payload, sessionTitle),
+    skill: route.skill,
+    skillLabel: form?.label || route.skill,
+    mode: route.mode,
+    artifact,
+    skillReason: payload.skillReason || route.reason || '',
+    text: formatIdeaArtifact(payload, route.skill, route.mode, sessionTitle),
     title: sessionTitle,
     sessionTitle,
     sessionId: record.id,
     at: Date.now(),
     source,
     trigger,
-    format: 2,
-    skills: (skills || []).map((skill) => skill.name),
+    format: 3,
+    skills: [route.skill],
   }
 }
 
-function localIdeaPayload(title, context, skills) {
+function localActPayload(title) {
   const sessionTitle = title || '这个会话'
-  const skill = skills[0]?.name || 'act-on-ground'
   return {
     title: clip(`把「${sessionTitle}」收成一个下一步`, 64),
-    suggestion: clip(
-      `把「${sessionTitle}」里刚确认的结论挑一条，写成可执行下一步，并补上验收条件。`,
-      220,
-    ),
-    rationale: '会话刚结束，结论还在上下文里；先固化成下一步，再开新对话。',
-    skill,
-    skillReason: '用执行型技能把讨论落地，而不是继续发散。',
+    rationale: '模型这次没有返回形态；先用执行型兜底，避免手动按钮完全空掉。',
+    skillReason: '执行型兜底。',
+    artifact: {
+      step: clip(
+        `把「${sessionTitle}」里刚确认的结论挑一条，写成可执行下一步，并补上验收条件。`,
+        240,
+      ),
+      acceptance: '能在一次专注时段内完成，并能指出完成/未完成的具体证据。',
+    },
   }
 }
 
@@ -883,31 +1100,75 @@ const SKILL_RULES = [
   },
 ]
 
-function selectOpenmindSkills(skills, title, context) {
-  if (!Array.isArray(skills) || skills.length === 0) return []
-  const haystack = `${title || ''}\n${context.userText || ''}\n${context.assistantText || ''}`.toLowerCase()
-  const ranked = skills.map((skill) => {
+function routeSkillFallback(state, title, context) {
+  const haystack = `${title || ''}\n${context.userText || ''}\n${context.assistantText || ''}`
+  const recent = state.ideas.slice(-3).map((idea) => idea.skill)
+  const completed = /(完成|收尾|结束|里程碑|上线|搞定|milestone|done|finished|shipped|wrap)/i.test(
+    haystack,
+  )
+  const scored = SKILL_FORM_NAMES.map((name) => {
     let score = 0
-    const rule = SKILL_RULES.find((entry) => entry.name === skill.name)
+    const rule = SKILL_RULES.find((entry) => entry.name === name)
     if (rule && rule.re.test(haystack)) score += 6
-    if (skill.name === 'act-on-ground') score += 1
-    const tokens = String(skill.description || '')
-      .toLowerCase()
-      .match(/[a-z\u4e00-\u9fff]{2,}/g) || []
-    for (const token of tokens) {
-      if (token.length >= 2 && haystack.includes(token)) score += 1
-    }
-    return { skill, score }
+    if (name === 'act-on-ground') score += 1
+    if (completed && name === 'poetic-essence') score += 5
+    if (completed && name === 'reflect-anchor') score += 3
+    if (recent.includes(name)) score -= 3
+    return { name, score }
   })
-  ranked.sort((a, b) => b.score - a.score)
-  const picked = []
-  for (const entry of ranked) {
-    if (picked.length >= 2) break
-    if (entry.score <= 0 && picked.length > 0) continue
-    if (!picked.some((skill) => skill.name === entry.skill.name)) picked.push(entry.skill)
+  scored.sort((a, b) => b.score - a.score)
+  const pick = scored[0]
+  const form = SKILL_FORMS[pick.name]
+  const mode = pick.name === 'poetic-essence' && completed ? 'WRITE' : form.defaultMode
+  return {
+    skill: pick.name,
+    mode,
+    reason: completed ? '会话刚收尾，适合定调或复盘。' : '按当前会话的关键词选择形态。',
+    source: 'heuristic',
   }
-  if (picked.length === 0) picked.push(ranked[0].skill)
-  return picked
+}
+
+function normalizeRoute(skill, mode) {
+  if (typeof skill !== 'string' || !SKILL_FORMS[skill]) return null
+  const form = SKILL_FORMS[skill]
+  const chosenMode =
+    typeof mode === 'string' && form.modes.includes(mode) ? mode : form.defaultMode
+  return { skill, mode: chosenMode, reason: '手动选择形态。', source: 'manual' }
+}
+
+function parseRoute(raw) {
+  if (typeof raw !== 'string') return null
+  const text = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start < 0 || end <= start) return null
+  let data
+  try {
+    data = JSON.parse(text.slice(start, end + 1))
+  } catch {
+    return null
+  }
+  const form = SKILL_FORMS[data.skill]
+  if (!form) return null
+  const mode = form.modes.includes(data.mode) ? data.mode : form.defaultMode
+  return {
+    skill: data.skill,
+    mode,
+    reason: cleanField(data.reason, 120),
+    source: 'router',
+  }
+}
+
+function skillCatalog(state) {
+  return SKILL_FORM_NAMES.map((name) => {
+    const form = SKILL_FORMS[name]
+    const loaded = state.openmind?.skills?.find((skill) => skill.name === name)
+    const description = loaded?.description || form.prompt
+    return `- ${name} [${form.label}] modes=${form.modes.join('|')}: ${description}`
+  }).join('\n')
 }
 
 function resolveOpenmindDir(state) {
@@ -1070,10 +1331,14 @@ async function handleIdea(state, req, res) {
     return
   }
   let sessionId = ''
+  let skill = ''
+  let mode = ''
   if (body.trim()) {
     try {
       const parsed = JSON.parse(body)
       if (typeof parsed?.sessionId === 'string') sessionId = parsed.sessionId.trim()
+      if (typeof parsed?.skill === 'string' && parsed.skill !== 'auto') skill = parsed.skill.trim()
+      if (typeof parsed?.mode === 'string') mode = parsed.mode.trim()
     } catch {
       /* 请求体不是 JSON 时按“当前最近会话”处理。 */
     }
@@ -1082,7 +1347,7 @@ async function handleIdea(state, req, res) {
     writeJson(res, 409, { ok: false, code: 'busy' })
     return
   }
-  const idea = await produceIdea(state, 'manual', sessionId)
+  const idea = await produceIdea(state, 'manual', sessionId, skill, mode)
   if (!idea) {
     writeJson(res, 503, { ok: false, code: 'unavailable' })
     return

@@ -26,6 +26,16 @@ window.__ModuleLoader__.load({
     const STYLE_ID = 'dsh-digital-spider-styles'
     const STATE_URL = '/dsh-digital-spider/state'
     const IDEA_URL = '/dsh-digital-spider/idea'
+    const SKILL_CHOICES = [
+      { id: 'auto', key: 'skill.auto' },
+      { id: 'poetic-essence', key: 'skill.poetic-essence' },
+      { id: 'deep-dream', key: 'skill.deep-dream' },
+      { id: 'constraint-flip', key: 'skill.constraint-flip' },
+      { id: 'cross-domain', key: 'skill.cross-domain' },
+      { id: 'clarify-intent', key: 'skill.clarify-intent' },
+      { id: 'act-on-ground', key: 'skill.act-on-ground' },
+      { id: 'reflect-anchor', key: 'skill.reflect-anchor' },
+    ]
 
     const POLL_MS = 1600
     const BUBBLE_MS = 7800
@@ -127,6 +137,7 @@ window.__ModuleLoader__.load({
 
     function ideaCopyText(idea) {
       if (!idea) return ''
+      if (Number(idea.format) >= 3 && typeof idea.text === 'string' && idea.text) return idea.text
       const lines = []
       const title = idea.ideaTitle || ''
       const suggestion = idea.suggestion || idea.text || ''
@@ -156,12 +167,66 @@ window.__ModuleLoader__.load({
         suggestion: idea.suggestion || '',
         rationale: idea.rationale || '',
         skill: idea.skill || '',
+        skillLabel: idea.skillLabel || idea.skill || '',
+        mode: idea.mode || '',
+        artifact: idea.artifact && typeof idea.artifact === 'object' ? idea.artifact : null,
         skillReason: idea.skillReason || '',
         source: idea.source || 'model',
         trigger: idea.trigger || 'manual',
-        format: 2,
+        format: Number(idea.format) || 2,
         priority: 2,
       }
+    }
+
+    function formRow(key, value, translate) {
+      if (!value) return null
+      return h(
+        'div',
+        { className: 'ds-pop__form-row', key },
+        h('span', { className: 'ds-pop__form-label' }, translate(key)),
+        h('span', { className: 'ds-pop__form-value' }, value),
+      )
+    }
+
+    function ideaArtifactNodes(idea, translate) {
+      const a = idea.artifact || {}
+      const rows = []
+      const skill = idea.skill || ''
+      if (skill === 'poetic-essence') {
+        if (a.poem) rows.push(h('div', { className: 'ds-pop__poem', key: 'poem' }, a.poem))
+        if (a.attribution) {
+          rows.push(
+            h('div', { className: 'ds-pop__attribution', key: 'attribution' }, `—— ${a.attribution}`),
+          )
+        }
+        rows.push(formRow('artifact.interpretation', a.interpretation, translate))
+        rows.push(formRow('artifact.implication', a.implication, translate))
+        rows.push(formRow('artifact.nextStep', a.nextStep, translate))
+      } else if (skill === 'deep-dream') {
+        if (a.dream) rows.push(h('div', { className: 'ds-pop__dream', key: 'dream' }, a.dream))
+        rows.push(formRow('artifact.insight', a.insight, translate))
+        rows.push(formRow('artifact.nextStep', a.nextStep, translate))
+      } else if (skill === 'constraint-flip') {
+        rows.push(formRow('artifact.constraint', a.constraint, translate))
+        rows.push(formRow('artifact.flipped', a.flipped, translate))
+        rows.push(formRow('artifact.nextStep', a.nextStep, translate))
+      } else if (skill === 'cross-domain') {
+        rows.push(formRow('artifact.analogy', a.analogy, translate))
+        rows.push(formRow('artifact.insight', a.insight, translate))
+        rows.push(formRow('artifact.nextStep', a.nextStep, translate))
+      } else if (skill === 'clarify-intent') {
+        rows.push(formRow('artifact.intent', a.intent, translate))
+        rows.push(formRow('artifact.question', a.question, translate))
+        rows.push(formRow('artifact.nextStep', a.nextStep, translate))
+      } else if (skill === 'act-on-ground') {
+        rows.push(formRow('artifact.step', a.step, translate))
+        rows.push(formRow('artifact.acceptance', a.acceptance, translate))
+      } else if (skill === 'reflect-anchor') {
+        rows.push(formRow('artifact.lesson', a.lesson, translate))
+        rows.push(formRow('artifact.anchor', a.anchor, translate))
+        rows.push(formRow('artifact.nextStep', a.nextStep, translate))
+      }
+      return rows.filter(Boolean)
     }
 
     const DICT = {
@@ -189,6 +254,32 @@ window.__ModuleLoader__.load({
         'copied': '已复制',
         'ignore': '忽略',
         'statusInbox': '点子抽屉',
+        'statusForm': '点子形态',
+        'formGenerate': '按这个形态生成',
+        'formHint': '让点子按诗、梦境、反转等形态长出来；自动会先让模型路由。',
+        'skill.auto': '自动选形态',
+        'skill.poetic-essence': '诗意点睛',
+        'skill.deep-dream': '深度梦境',
+        'skill.constraint-flip': '约束反转',
+        'skill.cross-domain': '跨域类比',
+        'skill.clarify-intent': '明心定向',
+        'skill.act-on-ground': '事上练',
+        'skill.reflect-anchor': '知行复盘',
+        'skillReason': '为什么用这个形态',
+        'artifact.interpretation': '解读',
+        'artifact.implication': '对项目的启示',
+        'artifact.nextStep': '下一步',
+        'artifact.dream': '梦境',
+        'artifact.insight': '洞察',
+        'artifact.constraint': '约束',
+        'artifact.flipped': '反转',
+        'artifact.analogy': '类比',
+        'artifact.intent': '意图',
+        'artifact.question': '关键问题',
+        'artifact.step': '下一步',
+        'artifact.acceptance': '验收',
+        'artifact.lesson': '教训',
+        'artifact.anchor': '锚点',
         'noInbox': '还没有收进抽屉的点子。',
         'openmind': 'OPENMIND',
         'openmindMissing': 'OpenMind 未加载',
@@ -249,6 +340,32 @@ window.__ModuleLoader__.load({
         'copied': 'Copied',
         'ignore': 'Ignore',
         'statusInbox': 'Idea inbox',
+        'statusForm': 'Idea form',
+        'formGenerate': 'Generate this form',
+        'formHint': 'Let the idea take the shape of a poem, dream, flip, and more. Auto routes with the model first.',
+        'skill.auto': 'Auto form',
+        'skill.poetic-essence': 'Poetic',
+        'skill.deep-dream': 'Deep dream',
+        'skill.constraint-flip': 'Constraint flip',
+        'skill.cross-domain': 'Cross-domain',
+        'skill.clarify-intent': 'Clarify intent',
+        'skill.act-on-ground': 'Act',
+        'skill.reflect-anchor': 'Reflect',
+        'skillReason': 'Why this form',
+        'artifact.interpretation': 'Interpretation',
+        'artifact.implication': 'Implication',
+        'artifact.nextStep': 'Next step',
+        'artifact.dream': 'Dream',
+        'artifact.insight': 'Insight',
+        'artifact.constraint': 'Constraint',
+        'artifact.flipped': 'Flip',
+        'artifact.analogy': 'Analogy',
+        'artifact.intent': 'Intent',
+        'artifact.question': 'Question',
+        'artifact.step': 'Step',
+        'artifact.acceptance': 'Acceptance',
+        'artifact.lesson': 'Lesson',
+        'artifact.anchor': 'Anchor',
         'noInbox': 'No ideas in the drawer yet.',
         'openmind': 'OPENMIND',
         'openmindMissing': 'OpenMind not loaded',
@@ -823,6 +940,56 @@ window.__ModuleLoader__.load({
   color: color-mix(in srgb, var(--ds-muted) 88%, transparent);
 }
 .ds-pop__skill { color: color-mix(in srgb, var(--ds-accent) 78%, var(--ds-muted)); }
+.ds-pop__poem {
+  margin: 5px 0 2px;
+  font-family: var(--ds-serif, "Songti SC", "STSong", "Noto Serif SC", Georgia, serif);
+  font-size: 13.5px;
+  line-height: 1.9;
+  letter-spacing: .04em;
+  white-space: pre-wrap;
+  color: var(--ds-text);
+}
+.ds-pop__attribution {
+  margin: 3px 0 7px;
+  text-align: right;
+  font-family: var(--ds-mono);
+  font-size: 8.5px;
+  letter-spacing: .04em;
+  color: color-mix(in srgb, var(--ds-muted) 88%, transparent);
+}
+.ds-pop__dream {
+  margin: 5px 0 7px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--ds-amber);
+  background: color-mix(in srgb, var(--ds-amber) 6%, transparent);
+  font-style: italic;
+  font-size: 11.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  color: color-mix(in srgb, var(--ds-text) 88%, transparent);
+}
+.ds-pop__form-row {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px dashed color-mix(in srgb, var(--ds-line) 68%, transparent);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.ds-pop__form-label {
+  padding-top: 2px;
+  font-family: var(--ds-mono);
+  font-size: 8px;
+  letter-spacing: .08em;
+  color: var(--ds-accent);
+}
+.ds-pop__form-value {
+  min-width: 0;
+  white-space: pre-wrap;
+  color: color-mix(in srgb, var(--ds-text) 86%, transparent);
+}
 .ds-btn {
   padding: 5px 9px;
   border: 1px solid color-mix(in srgb, var(--ds-accent) 58%, transparent);
@@ -981,6 +1148,29 @@ window.__ModuleLoader__.load({
   color: color-mix(in srgb, var(--ds-muted) 84%, transparent);
 }
 .ds-panel__idea-foot .ds-btn { margin-left: auto; }
+.ds-form__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ds-form__select {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid color-mix(in srgb, var(--ds-line-strong) 72%, transparent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ds-layer) 55%, transparent);
+  color: var(--ds-text);
+  font-family: var(--ds-mono);
+  font-size: 9px;
+  letter-spacing: .04em;
+  cursor: pointer;
+}
+.ds-form__hint {
+  font-size: 10px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--ds-muted) 88%, transparent);
+}
 .ds-inbox__item {
   display: grid;
   gap: 2px;
@@ -1257,12 +1447,15 @@ window.__ModuleLoader__.load({
         case 'idea': {
           const sessionTitle = item.sessionTitle || item.title || ''
           const skill = item.skill || ''
+          const skillLabel = item.skillLabel || skill
+          const mode = item.mode || ''
+          const formMeta = [skillLabel, mode].filter(Boolean).join(' · ')
           return {
             label: translate('label.idea'),
             title: sessionTitle
               ? format(translate('ideaFrom'), { title: sessionTitle })
               : translate('ideaTitle'),
-            meta: skill || (item.source === 'model' ? translate('source.model') : translate('source.local')),
+            meta: formMeta || (item.source === 'model' ? translate('source.model') : translate('source.local')),
             body: item.suggestion || item.text || '',
             hint: translate('ideaHint'),
             tone: 'idea',
@@ -1270,10 +1463,14 @@ window.__ModuleLoader__.load({
             suggestion: item.suggestion || item.text || '',
             rationale: item.rationale || '',
             skill,
+            skillLabel,
+            mode,
+            artifact: item.artifact && typeof item.artifact === 'object' ? item.artifact : null,
             skillReason: item.skillReason || '',
             sessionTitle,
             sessionId: item.sessionId || '',
             ideaSource: item.source || 'model',
+            format: Number(item.format) || 2,
           }
         }
         default:
@@ -1733,6 +1930,7 @@ window.__ModuleLoader__.load({
       const [generating, setGenerating] = React.useState(false)
       const [ideaError, setIdeaError] = React.useState(false)
       const [latestIdea, setLatestIdea] = React.useState(null)
+      const [skillChoice, setSkillChoice] = React.useState('auto')
       const [dismissedIds, setDismissedIds] = React.useState(() => new Set(readDismissedIdeaIds()))
       const [copyDone, setCopyDone] = React.useState(false)
       const [, setClock] = React.useState(0)
@@ -1829,7 +2027,11 @@ window.__ModuleLoader__.load({
             suggestion: content.suggestion,
             rationale: content.rationale,
             skill: content.skill,
+            skillLabel: content.skillLabel,
+            mode: content.mode,
+            artifact: content.artifact,
             skillReason: content.skillReason,
+            format: content.format,
             sessionTitle: content.sessionTitle,
             ideaSource: content.ideaSource,
           }
@@ -2065,8 +2267,12 @@ window.__ModuleLoader__.load({
               suggestion: event.suggestion || '',
               rationale: event.rationale || '',
               skill: event.skill || '',
+              skillLabel: event.skillLabel || event.skill || '',
+              mode: event.mode || '',
+              artifact: event.artifact && typeof event.artifact === 'object' ? event.artifact : null,
               skillReason: event.skillReason || '',
               source: event.source || 'model',
+              format: Number(event.format) || 3,
               trigger: event.trigger || 'rest',
               format: 2,
               priority: 2,
@@ -3260,16 +3466,19 @@ window.__ModuleLoader__.load({
         return () => window.removeEventListener('keydown', onKey)
       }, [panelOpen])
 
-      const requestIdea = async (sessionId) => {
+      const requestIdea = async (sessionId, skill, mode) => {
         if (generating) return
         setGenerating(true)
         setIdeaError(false)
         try {
           const timeout =
             typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
-              ? AbortSignal.timeout(60_000)
+              ? AbortSignal.timeout(90_000)
               : undefined
-          const payload = typeof sessionId === 'string' && sessionId ? { sessionId } : {}
+          const payload = {}
+          if (typeof sessionId === 'string' && sessionId) payload.sessionId = sessionId
+          if (typeof skill === 'string' && skill && skill !== 'auto') payload.skill = skill
+          if (typeof mode === 'string' && mode) payload.mode = mode
           const response = await fetch(`${window.location.origin}${IDEA_URL}`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -3290,6 +3499,11 @@ window.__ModuleLoader__.load({
                   clearTimeout(hideTimerRef.current)
                   bubbleRef.current = null
                   setBubble(null)
+                }
+                /* 从面板手动生成时先收起面板，让新形态的卡片真正露出来。 */
+                if (panelOpenRef.current) {
+                  panelOpenRef.current = false
+                  setPanelOpen(false)
                 }
                 if (apiRef.current) apiRef.current.enqueue(item)
               }
@@ -3391,6 +3605,7 @@ window.__ModuleLoader__.load({
         .reverse()
         .slice(0, 6)
       const openmind = (snapshot && snapshot.openmind) || null
+      const choiceSkill = skillChoice === 'auto' ? null : skillChoice
       const stats = format(translate('stats'), {
         sessions: sessions.length,
         tasks: schedules.length,
@@ -3766,7 +3981,9 @@ window.__ModuleLoader__.load({
                         React.Fragment,
                         null,
                         h('p', { className: 'ds-pop__title' }, bubble.ideaTitle || bubble.title),
-                        h('p', { className: 'ds-pop__body' }, bubble.suggestion || bubble.body),
+                        bubble.artifact
+                          ? h(React.Fragment, null, ...ideaArtifactNodes(bubble, translate))
+                          : h('p', { className: 'ds-pop__body' }, bubble.suggestion || bubble.body),
                         bubble.rationale
                           ? h(
                               'div',
@@ -3786,11 +4003,11 @@ window.__ModuleLoader__.load({
                               }`,
                             )
                           : null,
-                        bubble.skill
+                        bubble.skillReason
                           ? h(
                               'div',
                               { className: 'ds-pop__skill' },
-                              `${translate('skill')} · ${bubble.skill}`,
+                              `${translate('skillReason')} · ${bubble.skillReason}`,
                             )
                           : null,
                       )
@@ -3841,7 +4058,7 @@ window.__ModuleLoader__.load({
                               type: 'button',
                               className: 'ds-btn',
                               disabled: generating,
-                              onClick: () => requestIdea(bubble.sessionId),
+                              onClick: () => requestIdea(bubble.sessionId, bubble.skill, bubble.mode),
                             },
                             generating ? translate('thinking') : translate('anotherIdea'),
                           ),
@@ -4004,7 +4221,9 @@ window.__ModuleLoader__.load({
                             h(
                               'span',
                               null,
-                              panelIdea.skill ||
+                              [panelIdea.skillLabel || panelIdea.skill, panelIdea.mode]
+                                .filter(Boolean)
+                                .join(' · ') ||
                                 panelIdea.sessionTitle ||
                                 panelIdea.title ||
                                 translate('ideaTitle'),
@@ -4022,7 +4241,7 @@ window.__ModuleLoader__.load({
                                 type: 'button',
                                 className: 'ds-btn',
                                 disabled: generating,
-                                onClick: () => requestIdea(panelIdea.sessionId),
+                                onClick: () => requestIdea(panelIdea.sessionId, choiceSkill, null),
                               },
                               generating ? translate('thinking') : translate('anotherIdea'),
                             ),
@@ -4038,13 +4257,50 @@ window.__ModuleLoader__.load({
                               type: 'button',
                               className: 'ds-btn',
                               disabled: generating,
-                              onClick: () => requestIdea(null),
+                              onClick: () => requestIdea(null, choiceSkill, null),
                               style: { marginLeft: '8px' },
                             },
                             generating ? translate('thinking') : translate('anotherIdea'),
                           ),
                         ),
                     ideaError ? h('div', { className: 'ds-pop__error' }, translate('ideaError')) : null,
+                  ),
+                  h(
+                    'div',
+                    { className: 'ds-panel__sec ds-form' },
+                    h('div', { className: 'ds-panel__label' }, translate('statusForm')),
+                    h(
+                      'div',
+                      { className: 'ds-form__row' },
+                      h(
+                        'select',
+                        {
+                          className: 'ds-form__select',
+                          value: skillChoice,
+                          onChange: (event) => setSkillChoice(event.target.value),
+                          'aria-label': translate('statusForm'),
+                        },
+                        SKILL_CHOICES.map((choice) =>
+                          h(
+                            'option',
+                            { key: choice.id, value: choice.id },
+                            translate(choice.key),
+                          ),
+                        ),
+                      ),
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'ds-btn',
+                          disabled: generating,
+                          onClick: () =>
+                            requestIdea(panelIdea ? panelIdea.sessionId : null, choiceSkill, null),
+                        },
+                        generating ? translate('thinking') : translate('formGenerate'),
+                      ),
+                    ),
+                    h('div', { className: 'ds-form__hint' }, translate('formHint')),
                   ),
                   h(
                     'div',
@@ -4069,9 +4325,13 @@ window.__ModuleLoader__.load({
                             h(
                               'span',
                               { className: 'ds-inbox__meta' },
-                              `${idea.skill || translate('source.local')} · ${
-                                idea.sessionTitle || ''
-                              }`,
+                              [
+                                idea.skillLabel || idea.skill || translate('source.local'),
+                                idea.mode,
+                                idea.sessionTitle,
+                              ]
+                                .filter(Boolean)
+                                .join(' · '),
                             ),
                           ),
                         ),
