@@ -1514,8 +1514,11 @@ window.__ModuleLoader__.load({
                   className: 'si-sb-nav__row si-sb-nav__row--group',
                   title: SDD_GROUP_LABEL,
                   'aria-label': SDD_GROUP_LABEL,
-                  'aria-expanded': sddCollapsed ? 'false' : 'true',
-                  onClick: () => setSddCollapsed((value) => !value)
+                  'aria-expanded': 'true',
+                  onClick: () => {
+                    setSddCollapsed(false)
+                    selectPanel('dashboard')
+                  }
                 },
                 h(
                   'span',
@@ -2168,11 +2171,19 @@ window.__ModuleLoader__.load({
         })
         ctx.effect(() => ctx.locale.subscribe(syncPanels))
 
-        const layout = ctx.get('layout')
         const navInject = () => ({
-          startSession: (workspaceId) => uiWorkspace && uiWorkspace.startSession(workspaceId),
-          toggleSidebar: () => layout && layout.toggleSidebar(),
-          selectPanel: (id) => layout && layout.selectPanel(id),
+          startSession: (workspaceId) => {
+            const ui = ctx.get('uiWorkspace')
+            if (ui && typeof ui.startSession === 'function') ui.startSession(workspaceId)
+          },
+          toggleSidebar: () => {
+            const current = ctx.get('layout')
+            if (current && typeof current.toggleSidebar === 'function') current.toggleSidebar()
+          },
+          selectPanel: (id) => {
+            const current = ctx.get('layout')
+            if (current && typeof current.selectPanel === 'function') current.selectPanel(id)
+          },
           usePanels,
           t: (key) => t(key)
         })
@@ -2206,8 +2217,14 @@ window.__ModuleLoader__.load({
                 name: 'shell.leading',
                 priority: -10,
                 inject: () => ({
-                  startSession: (workspaceId) => uiWorkspace && uiWorkspace.startSession(workspaceId),
-                  toggleSidebar: () => layout && layout.toggleSidebar(),
+                  startSession: (workspaceId) => {
+                    const ui = ctx.get('uiWorkspace')
+                    if (ui && typeof ui.startSession === 'function') ui.startSession(workspaceId)
+                  },
+                  toggleSidebar: () => {
+                    const current = ctx.get('layout')
+                    if (current && typeof current.toggleSidebar === 'function') current.toggleSidebar()
+                  },
                   t: (key) => t(key)
                 })
               },
@@ -2225,6 +2242,6 @@ window.__ModuleLoader__.load({
       )
     }
 
-    return { inject: ['slots', 'theme', 'locale'], apply }
+    return { inject: ['slots', 'theme', 'locale', 'layout', 'uiWorkspace'], apply }
   }
 })
