@@ -2332,16 +2332,24 @@ window.__ModuleLoader__.load({
     }
 
     function placePop(x, y, isPanel) {
-      const width = Math.max(320, window.innerWidth || 1200)
+      const width = window.innerWidth || 1200
+      const height = window.innerHeight || 800
       const popWidth = Math.min(336, width - 28)
       const left = clamp(-popWidth / 2, 12 - x, width - popWidth - 12 - x)
       const notch = clamp(-left, 18, popWidth - 18)
-      const above = y > (isPanel ? 420 : 285)
+
+      /* 上下都要留出 48px 引线和 12px 视口边距；哪边空间大就翻到哪边。 */
+      const aboveRoom = y - 60
+      const belowRoom = height - y - 60
+      const above = aboveRoom >= belowRoom
+      const room = Math.max(120, above ? aboveRoom : belowRoom)
+      const maxHeight = isPanel ? Math.min(460, room) : room
+
       /* 想法气泡：优先浮在蜘蛛右上方，靠右边缘时翻到左侧。 */
       const thoughtWidth = Math.min(232, width - 28)
       const thoughtLeft = clamp(10, 12 - x, width - thoughtWidth - 12 - x)
       const thoughtSide = thoughtLeft + thoughtWidth / 2 >= 0 ? 1 : -1
-      return { left, notch, above, thoughtLeft, thoughtWidth, thoughtSide }
+      return { left, notch, above, maxHeight, thoughtLeft, thoughtWidth, thoughtSide }
     }
 
     function legPoint(sim, leg, local) {
@@ -2454,7 +2462,12 @@ window.__ModuleLoader__.load({
       const [motion, setMotion] = React.useState(readMotionStyle)
       const [bubble, setBubble] = React.useState(null)
       const [panelOpen, setPanelOpen] = React.useState(false)
-      const [placement, setPlacement] = React.useState({ left: -168, notch: 168, above: true })
+      const [placement, setPlacement] = React.useState({
+        left: -168,
+        notch: 168,
+        above: true,
+        maxHeight: 460,
+      })
       const [generating, setGenerating] = React.useState(false)
       const [ideaError, setIdeaError] = React.useState(false)
       const [latestIdea, setLatestIdea] = React.useState(null)
@@ -4048,6 +4061,18 @@ window.__ModuleLoader__.load({
         return () => window.removeEventListener('keydown', onKey)
       }, [panelOpen])
 
+      /* 窗口尺寸变化后重新夹紧，避免卡片/面板留在视口外。 */
+      React.useEffect(() => {
+        const onResize = () => {
+          const sim = simRef.current
+          if (!sim) return
+          if (bubbleRef.current) setPlacement(placePop(sim.rx, sim.ry, false))
+          else if (panelOpenRef.current) setPlacement(placePop(sim.rx, sim.ry, true))
+        }
+        window.addEventListener('resize', onResize)
+        return () => window.removeEventListener('resize', onResize)
+      }, [])
+
       const requestIdea = async (sessionId, skill, mode) => {
         if (generating) return
         setGenerating(true)
@@ -4204,6 +4229,8 @@ window.__ModuleLoader__.load({
       const popStyle = {
         left: `${placement.left.toFixed(1)}px`,
         '--ds-notch': `${placement.notch.toFixed(1)}px`,
+        maxHeight: `${(placement.maxHeight || 460).toFixed(0)}px`,
+        overflowY: 'auto',
       }
 
       return h(
