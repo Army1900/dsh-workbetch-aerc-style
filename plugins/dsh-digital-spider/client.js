@@ -1337,8 +1337,8 @@ window.__ModuleLoader__.load({
           now +
           (leg.front ? 1400 + Math.random() * 2200 : 3200 + Math.random() * 4200),
         cyber: {
-          limit: 108 + Math.random() * 80,
-          nextStepAt: now + 400 + Math.random() * 1400,
+          limit: 78 + Math.random() * 50,
+          nextStepAt: now + 300 + Math.random() * 1000,
           phase: Math.random() * Math.PI * 2,
         },
       }
@@ -1392,8 +1392,8 @@ window.__ModuleLoader__.load({
           leg.stepping = false
           leg.lift = 0
           leg.nextAt = 0
-          leg.cyber.limit = 108 + Math.random() * 80
-          leg.cyber.nextStepAt = now + 400 + Math.random() * 1200
+          leg.cyber.limit = 78 + Math.random() * 50
+          leg.cyber.nextStepAt = now + 300 + Math.random() * 1000
           leg.cyber.phase = Math.random() * Math.PI * 2
           continue
         }
@@ -1974,9 +1974,9 @@ window.__ModuleLoader__.load({
                 leg.foot = { x: leg.to.x, y: leg.to.y }
                 leg.lift = 0
                 plantGrip(leg.foot)
-                leg.cyber.limit = 108 + Math.random() * 90
+                leg.cyber.limit = 78 + Math.random() * 50
                 leg.cyber.nextStepAt =
-                  now + (speed > 160 ? 300 + Math.random() * 600 : 650 + Math.random() * 1500)
+                  now + (speed > 160 ? 260 + Math.random() * 500 : 450 + Math.random() * 900)
                 sim.startle = Math.max(sim.startle, 0.16)
                 swinging = Math.max(0, swinging - 1)
               } else {
@@ -1999,9 +1999,10 @@ window.__ModuleLoader__.load({
             let angle
             let radius
             if (moving) {
-              angle = homeAngle * 0.55 + motionAngle * 0.45 + (Math.random() - 0.5) * 0.5
+              const lead = leg.def.front ? 0.7 : 0.42
+              angle = homeAngle * (1 - lead) + motionAngle * lead + (Math.random() - 0.5) * 0.5
               radius =
-                (leg.def.front ? 96 : 80) + Math.random() * 90 + (speed > 160 ? 45 : 0)
+                (leg.def.front ? 78 : 68) + Math.random() * 60 + (speed > 160 ? 35 : 0)
             } else {
               angle = homeAngle + (Math.random() - 0.5) * 0.55
               radius = 58 + Math.random() * 64
@@ -2025,13 +2026,13 @@ window.__ModuleLoader__.load({
             leg.dur = moving
               ? speed > 160
                 ? 90 + Math.random() * 70
-                : 150 + Math.random() * 150
+                : 140 + Math.random() * 130
               : 240 + Math.random() * 120
             leg.stepping = true
             leg.lift = 0
             leg.arc = (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 9)
             leg.cyber.nextStepAt =
-              now + (speed > 160 ? 280 + Math.random() * 620 : 700 + Math.random() * 1600)
+              now + (speed > 160 ? 240 + Math.random() * 500 : 500 + Math.random() * 1000)
             swinging += 1
           }
         }
@@ -2245,7 +2246,7 @@ window.__ModuleLoader__.load({
               sim.mode === 'run'
                 ? RUN_SPEED
                 : motionRef.current === MOTION_CYBER
-                  ? 68
+                  ? 58
                   : WALK_SPEED
             if (dist <= 4) {
               sim.x = sim.target.x
@@ -2269,6 +2270,20 @@ window.__ModuleLoader__.load({
                 sim.nextBurstAt = now + 2400 + Math.random() * 3200
               }
               let desired = Math.min(maxSpeed, Math.sqrt(2 * ACCEL * dist))
+              if (sim.mode === 'walk' && motionRef.current === MOTION_CYBER) {
+                let drag = 0
+                for (const leg of sim.legs) {
+                  const hip = legPoint(sim, leg, [leg.def.hip[0], leg.def.hip[1]])
+                  const relX = leg.foot.x - hip.x
+                  const relY = leg.foot.y - hip.y
+                  drag += Math.max(0, -(relX * ux + relY * uy))
+                }
+                const averageDrag = drag / Math.max(1, sim.legs.length)
+                desired *= clamp(1 - averageDrag / 90, 0.38, 1)
+                let swingingNow = 0
+                for (const leg of sim.legs) if (leg.stepping) swingingNow += 1
+                desired *= clamp(1 - swingingNow * 0.08, 0.7, 1)
+              }
               if (sim.mode === 'walk' && motionRef.current !== MOTION_CYBER && now < sim.pauseUntil) {
                 desired = 0
               }
