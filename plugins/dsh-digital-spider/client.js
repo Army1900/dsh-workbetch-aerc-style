@@ -190,7 +190,7 @@ window.__ModuleLoader__.load({
         'noRunning': '目前没有会话在推进。',
         'noSchedules': '没有等待中的定时任务。',
         'noIdea': '还在读你的会话，点子会自己冒出来。',
-        'statusHint': '点击蜘蛛收起 · 没有事件时我待在右下角的结点',
+        'statusHint': '点击蜘蛛收起 · 没有事件时我慢慢巡游，收到提醒会去对应位置',
         'online': 'ONLINE',
         'offline': 'LINK LOST',
         'offlineHint': 'Host 半部暂时不可达，正在重连。',
@@ -250,7 +250,7 @@ window.__ModuleLoader__.load({
         'noRunning': 'No session is running right now.',
         'noSchedules': 'No scheduled task is waiting.',
         'noIdea': 'Still reading your sessions. An idea will surface.',
-        'statusHint': 'Click the spider to close · I rest at the bottom-right node when idle',
+        'statusHint': 'Click the spider to close · I patrol slowly when idle and go to alerts',
         'online': 'ONLINE',
         'offline': 'LINK LOST',
         'offlineHint': 'The Host half is unreachable. Reconnecting.',
@@ -1410,6 +1410,17 @@ window.__ModuleLoader__.load({
       sim.abdomenLag = 0
     }
 
+    function randomPoint(width, height) {
+      const left = 86
+      const top = 108
+      const right = Math.max(left + 40, width - 86)
+      const bottom = Math.max(top + 40, height - 76)
+      return {
+        x: left + Math.random() * (right - left),
+        y: top + Math.random() * (bottom - top),
+      }
+    }
+
     function targetForItem(item) {
       /* 有会话行锚点就去真实行上；行不在视口/没有锚点时回 dock。 */
       const anchor = sessionAnchor(item?.sessionId)
@@ -1890,7 +1901,7 @@ window.__ModuleLoader__.load({
         sim.ry = dock.y
         sim.target = { x: dock.x, y: dock.y }
         sim.mode = 'idle'
-        sim.nextWanderAt = Number.POSITIVE_INFINITY
+        sim.nextWanderAt = now0 + 5000 + Math.random() * 4000
         resetLegsForMotion(sim, motionRef.current, now0)
         simRef.current = sim
         let raf = 0
@@ -2248,7 +2259,7 @@ window.__ModuleLoader__.load({
                 if (apiRef.current) apiRef.current.showItem(item)
               } else {
                 sim.mode = 'idle'
-                sim.nextWanderAt = now + 2600 + Math.random() * 4500
+                sim.nextWanderAt = now + 4500 + Math.random() * 5500
               }
             } else {
               const ux = dx / dist
@@ -2286,14 +2297,13 @@ window.__ModuleLoader__.load({
               !reduced &&
               !sim.pending &&
               !bubbleRef.current &&
-              !panelOpenRef.current
+              !panelOpenRef.current &&
+              now > sim.nextWanderAt
             ) {
-              const dock = dockPoint()
-              if (Math.hypot(sim.x - dock.x, sim.y - dock.y) > 8) {
-                sim.target = dock
-                sim.mode = 'walk'
-                sim.nextWanderAt = Number.POSITIVE_INFINITY
-              }
+              sim.target = randomPoint(width, height)
+              sim.mode = 'walk'
+              sim.nextWanderAt = Number.POSITIVE_INFINITY
+              sim.nextBurstAt = now + 1600 + Math.random() * 2200
             }
 
             if (!reduced) {
