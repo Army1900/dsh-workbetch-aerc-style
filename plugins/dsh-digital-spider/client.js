@@ -172,7 +172,7 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { className: 'ds-thought__poem', key: 'poem' },
-              firstPoemLines(a.poem, 3) || idea.ideaTitle || '',
+              firstPoemLines(a.poem, 8) || idea.ideaTitle || '',
             ),
           )
           if (a.attribution) {
@@ -184,6 +184,9 @@ window.__ModuleLoader__.load({
               ),
             )
           }
+          nodes.push(
+            h('div', { className: 'ds-thought__more', key: 'more' }, translate('poemPeek')),
+          )
           break
         case 'deep-dream':
           nodes.push(
@@ -430,6 +433,7 @@ window.__ModuleLoader__.load({
         'anotherIdea': '再想一个',
         'ideaPeek': '点开看完整点子',
         'thought': '蜘蛛想到',
+        'poemPeek': '点开看解读',
         'label.mood': 'MOOD SIGNAL',
         'mood.positive': '替你高兴',
         'mood.negative': '陪着你',
@@ -538,6 +542,7 @@ window.__ModuleLoader__.load({
         'anotherIdea': 'Another idea',
         'ideaPeek': 'Open the full idea',
         'thought': 'SPIDER THOUGHT',
+        'poemPeek': 'Open for the reading',
         'label.mood': 'MOOD SIGNAL',
         'mood.positive': 'Nice',
         'mood.negative': 'I’m here',
@@ -1289,16 +1294,20 @@ window.__ModuleLoader__.load({
   opacity: .55;
 }
 .ds-thought__poem {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  display: block;
   white-space: pre-wrap;
   font-family: var(--ds-serif, "Songti SC", "STSong", "Noto Serif SC", Georgia, serif);
   font-size: 12.5px;
   line-height: 1.7;
   letter-spacing: .04em;
   color: var(--ds-text);
+}
+.ds-thought__more {
+  margin-top: 1px;
+  font-family: var(--ds-mono);
+  font-size: 7.5px;
+  letter-spacing: .06em;
+  color: color-mix(in srgb, var(--ds-accent) 72%, var(--ds-muted));
 }
 .ds-thought__attribution {
   overflow: hidden;
